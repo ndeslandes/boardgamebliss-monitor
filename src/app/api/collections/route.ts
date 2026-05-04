@@ -14,7 +14,11 @@ export async function GET() {
   }
 
   const tracked = STORES.flatMap(s =>
-    getTrackedCollections(s.id).map(c => ({ ...c, storeId: s.id, storeName: s.name }))
+    getTrackedCollections(s.id).map(c => ({ ...c, storeId: s.id, storeName: s.name, displayOrder: s.displayOrder }))
+  ).sort((a, b) =>
+    a.displayOrder !== b.displayOrder
+      ? a.displayOrder - b.displayOrder
+      : (b.publishedAt ?? b.firstSeenAt).localeCompare(a.publishedAt ?? a.firstSeenAt)
   );
   const otherNew = STORES.flatMap(s =>
     getNewUntracked(s.id).map(c => ({ ...c, storeId: s.id, storeName: s.name }))
