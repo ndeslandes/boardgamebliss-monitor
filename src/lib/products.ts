@@ -177,13 +177,26 @@ export function getProductCount(storeId: string): number {
   return Object.keys(read(storeId).byHandle).length;
 }
 
+export function storeBggRanks(storeId: string, ranks: { handle: string; bggRank: number }[]): number {
+  const store = read(storeId);
+  let updated = 0;
+  for (const { handle, bggRank } of ranks) {
+    if (store.byHandle[handle] && typeof bggRank === 'number') {
+      store.byHandle[handle].bggRank = bggRank;
+      updated++;
+    }
+  }
+  if (updated > 0) write(storeId, store);
+  return updated;
+}
+
 export async function updateBggRanks(storeId: string, maxProducts = 300): Promise<number> {
   const store = read(storeId);
   const toFetch: { handle: string; bggId: number }[] = [];
 
   for (const [handle, product] of Object.entries(store.byHandle)) {
     if (toFetch.length >= maxProducts) break;
-    if (product.bggUrl && product.bggRank === null) {
+    if (product.bggUrl && product.bggRank == null) {
       const bggId = parseBggId(product.bggUrl);
       if (bggId) toFetch.push({ handle, bggId });
     }

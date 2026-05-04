@@ -5,6 +5,55 @@ import Link from 'next/link';
 import type { CachedProduct, CachedVariant } from '@/lib/products';
 import { timeAgo } from '@/lib/utils';
 
+async function fetchBggRanksFromBrowser(
+  storeId: string,
+  products: CachedProduct[],
+  onRank: (updater: (prev: Map<string, number>) => Map<string, number>) => void,
+) {
+  const BATCH = 20;
+  const saved: { handle: string; bggRank: number }[] = [];
+
+  for (let i = 0; i < products.length; i += BATCH) {
+    const batch = products.slice(i, i + BATCH);
+    const idToHandle = new Map<number, string>();
+    for (const p of batch) {
+      const m = p.bggUrl!.match(/\/boardgame\/(\d+)/);
+      if (m) idToHandle.set(parseInt(m[1], 10), p.handle);
+    }
+    try {
+      const res = await fetch(
+        `https://boardgamegeek.com/xmlapi2/thing?id=${[...idToHandle.keys()].join(',')}&stats=1`
+      );
+      if (!res.ok) break;
+      const xml = await res.text();
+      const doc = new DOMParser().parseFromString(xml, 'text/xml');
+      for (const item of doc.querySelectorAll('item')) {
+        const id = parseInt(item.getAttribute('id') ?? '0', 10);
+        const handle = idToHandle.get(id);
+        if (!handle) continue;
+        const rankEl = [...item.querySelectorAll('rank')].find(r => r.getAttribute('name') === 'boardgame');
+        const val = rankEl?.getAttribute('value');
+        if (val && val !== 'Not Ranked') {
+          const rank = parseInt(val, 10);
+          if (!isNaN(rank)) {
+            onRank(prev => new Map(prev).set(handle, rank));
+            saved.push({ handle, bggRank: rank });
+          }
+        }
+      }
+    } catch { break; }
+    if (i + BATCH < products.length) await new Promise(r => setTimeout(r, 700));
+  }
+
+  if (saved.length > 0) {
+    fetch(`/api/${storeId}/store-bgg-ranks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ranks: saved }),
+    }).catch(() => {});
+  }
+}
+
 const STORE_DOMAINS: Record<string, string> = {
   boardgamebliss: 'https://www.boardgamebliss.com',
   '401games': 'https://store.401games.ca',
@@ -41,6 +90,7 @@ export default function CollectionPage({ params }: { params: { storeId: string; 
   const [sortBy, setSortBy] = useState<SortKey>('status');
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
+  const [liveRanks, setLiveRanks] = useState<Map<string, number>>(new Map());
 
   useEffect(() => {
     fetch(`/api/${storeId}/collection-products/${handle}`)
@@ -49,6 +99,8 @@ export default function CollectionPage({ params }: { params: { storeId: string; 
         if (d.error) { setError(d.error); return; }
         setProducts(d.products);
         if (d.products.length > 0) setCachedAt(d.products[0].cachedAt ?? null);
+        const needsRank = (d.products as CachedProduct[]).filter((p: CachedProduct) => p.bggUrl && p.bggRank == null);
+        if (needsRank.length > 0) fetchBggRanksFromBrowser(storeId, needsRank, setLiveRanks);
       })
       .catch(e => setError(e.message));
 
@@ -112,14 +164,16 @@ export default function CollectionPage({ params }: { params: { storeId: string; 
       if (sortBy === 'price') return lowestPrice(a) - lowestPrice(b);
       if (sortBy === 'vendor') return a.vendor.localeCompare(b.vendor);
       if (sortBy === 'rank') {
-        if (a.bggRank == null && b.bggRank == null) return a.title.localeCompare(b.title);
-        if (a.bggRank == null) return 1;
-        if (b.bggRank == null) return -1;
-        return a.bggRank - b.bggRank;
+        const ar = a.bggRank ?? liveRanks.get(a.handle) ?? null;
+        const br = b.bggRank ?? liveRanks.get(b.handle) ?? null;
+        if (ar == null && br == null) return a.title.localeCompare(b.title);
+        if (ar == null) return 1;
+        if (br == null) return -1;
+        return ar - br;
       }
       return 0;
     });
-  }, [products, sortBy, filter, search, wishlist, storeId]);
+  }, [products, sortBy, filter, search, wishlist, storeId, liveRanks]);
 
   const stats = useMemo(() => {
     if (!products) return null;
@@ -270,9 +324,9 @@ export default function CollectionPage({ params }: { params: { storeId: string; 
                                 BGG
                               </a>
                             )}
-                            {product.bggRank != null && (
+                            {(product.bggRank ?? liveRanks.get(product.handle)) != null && (
                               <span className="text-xs font-mono text-amber-400 shrink-0" title="BGG overall rank">
-                                #{product.bggRank}
+                                #{product.bggRank ?? liveRanks.get(product.handle)}
                               </span>
                             )}
                             </div>
