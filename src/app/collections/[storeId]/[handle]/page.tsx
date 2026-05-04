@@ -10,7 +10,7 @@ const STORE_DOMAINS: Record<string, string> = {
   '401games': 'https://store.401games.ca',
 };
 
-type SortKey = 'status' | 'title' | 'price' | 'vendor' | 'wishlist';
+type SortKey = 'status' | 'title' | 'price' | 'vendor' | 'wishlist' | 'rank';
 type Filter = 'all' | 'available' | 'soldout' | 'wishlist';
 
 function lowestPrice(p: CachedProduct) {
@@ -111,6 +111,12 @@ export default function CollectionPage({ params }: { params: { storeId: string; 
       if (sortBy === 'title') return a.title.localeCompare(b.title);
       if (sortBy === 'price') return lowestPrice(a) - lowestPrice(b);
       if (sortBy === 'vendor') return a.vendor.localeCompare(b.vendor);
+      if (sortBy === 'rank') {
+        if (a.bggRank == null && b.bggRank == null) return a.title.localeCompare(b.title);
+        if (a.bggRank == null) return 1;
+        if (b.bggRank == null) return -1;
+        return a.bggRank - b.bggRank;
+      }
       return 0;
     });
   }, [products, sortBy, filter, search, wishlist, storeId]);
@@ -191,13 +197,13 @@ export default function CollectionPage({ params }: { params: { storeId: string; 
             </div>
             <div className="flex gap-1 ml-auto">
               <span className="text-gray-600 text-xs self-center mr-1">sort:</span>
-              {(['status', 'title', 'price', 'vendor', 'wishlist'] as SortKey[]).map(s => (
+              {(['status', 'title', 'price', 'vendor', 'rank', 'wishlist'] as SortKey[]).map(s => (
                 <button key={s} onClick={() => setSortBy(s)}
                   className={`px-3 py-1.5 text-xs rounded-lg capitalize transition-colors ${
                     sortBy === s ? 'bg-gray-700 text-white' : 'bg-gray-900 text-gray-400 hover:text-gray-200'
                   }`}
                 >
-                  {s === 'wishlist' ? '♥' : s}
+                  {s === 'wishlist' ? '♥' : s === 'rank' ? 'BGG rank' : s}
                 </button>
               ))}
             </div>
@@ -259,11 +265,16 @@ export default function CollectionPage({ params }: { params: { storeId: string; 
                                 {product.title}
                               </a>
                               {product.bggUrl && (
-                                <a href={product.bggUrl} target="_blank" rel="noreferrer"
-                                  className="text-orange-500 hover:text-orange-400 text-xs font-medium shrink-0" title="BoardGameGeek">
-                                  BGG
-                                </a>
-                              )}
+                              <a href={product.bggUrl} target="_blank" rel="noreferrer"
+                                className="text-orange-500 hover:text-orange-400 text-xs font-medium shrink-0" title="BoardGameGeek">
+                                BGG
+                              </a>
+                            )}
+                            {product.bggRank != null && (
+                              <span className="text-xs font-mono text-amber-400 shrink-0" title="BGG overall rank">
+                                #{product.bggRank}
+                              </span>
+                            )}
                             </div>
                             {product.tags.length > 0 && (
                               <div className="flex flex-wrap gap-1 mt-1">

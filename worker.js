@@ -36,6 +36,10 @@ async function pollStore(storeId) {
     console.log(`[worker ${ts}] [${storeId}] Fetching product counts...`);
     const counts = await fetchWithRetry(`${BASE}/${storeId}/poll-counts`);
     console.log(`[worker ${ts}] [${storeId}] Product counts updated for ${counts.updated} collections.`);
+
+    console.log(`[worker ${ts}] [${storeId}] Syncing BGG ranks...`);
+    const bgg = await fetchWithRetry(`${BASE}/${storeId}/sync-bgg-ranks`);
+    console.log(`[worker ${ts}] [${storeId}] BGG ranks updated: ${bgg.updated}.`);
   } catch (err) {
     console.error(`[worker ${ts}] [${storeId}] Poll failed: ${err.message}`);
   }
