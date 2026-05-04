@@ -172,25 +172,24 @@ async function fetchWishlistBggRanks(
     byStore.set(item.storeId, list);
   }
 
-  for (const [storeId, storeItems] of byStore) {
+  const fetchForStore = async (storeId: string, storeItems: WishlistItem[]) => {
     const idToHandle = new Map<number, string>();
     for (const item of storeItems) {
       const m = item.bggUrl!.match(/\/boardgame\/(\d+)/);
       if (m) idToHandle.set(parseInt(m[1], 10), item.productHandle);
     }
     try {
-      const res = await fetch(
-        `https://boardgamegeek.com/xmlapi2/thing?id=${[...idToHandle.keys()].join(',')}&stats=1`
-      );
-      if (!res.ok) continue;
+      const ids = Array.from(idToHandle.keys()).join(',');
+      const res = await fetch(`https://boardgamegeek.com/xmlapi2/thing?id=${ids}&stats=1`);
+      if (!res.ok) return;
       const xml = await res.text();
       const doc = new DOMParser().parseFromString(xml, 'text/xml');
       const saved: { handle: string; bggRank: number }[] = [];
-      for (const el of doc.querySelectorAll('item')) {
+      doc.querySelectorAll('item').forEach(el => {
         const id = parseInt(el.getAttribute('id') ?? '0', 10);
         const handle = idToHandle.get(id);
-        if (!handle) continue;
-        const rankEl = [...el.querySelectorAll('rank')].find(r => r.getAttribute('name') === 'boardgame');
+        if (!handle) return;
+        const rankEl = Array.from(el.querySelectorAll('rank')).find(r => r.getAttribute('name') === 'boardgame');
         const val = rankEl?.getAttribute('value');
         if (val && val !== 'Not Ranked') {
           const rank = parseInt(val, 10);
@@ -199,7 +198,7 @@ async function fetchWishlistBggRanks(
             saved.push({ handle, bggRank: rank });
           }
         }
-      }
+      });
       if (saved.length > 0) {
         fetch(`/api/${storeId}/store-bgg-ranks`, {
           method: 'POST',
@@ -207,8 +206,10 @@ async function fetchWishlistBggRanks(
           body: JSON.stringify({ ranks: saved }),
         }).catch(() => {});
       }
-    } catch { continue; }
-  }
+    } catch { /* BGG unreachable, skip silently */ }
+  };
+
+  byStore.forEach((storeItems, storeId) => { fetchForStore(storeId, storeItems); });
 }
 
 export default function Dashboard() {

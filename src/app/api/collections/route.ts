@@ -14,7 +14,7 @@ export async function GET() {
     for (const p of products) {
       const key = `${store.id}:${p.handle}`;
       availMap.set(key, p.available);
-      bggMap.set(key, { bggUrl: p.bggUrl, bggRank: p.bggRank });
+      bggMap.set(key, { bggUrl: p.bggUrl, bggRank: p.bggRank ?? null });
     }
   }
 
