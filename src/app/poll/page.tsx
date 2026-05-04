@@ -116,6 +116,7 @@ export default function PollPage() {
       // Step 2: fetch ranks from BGG in the browser (bypasses Cloudflare IP block)
       const BATCH = 20;
       const saved: { handle: string; bggRank: number }[] = [];
+      let earlyExit: { error: true; detail: string } | null = null;
 
       for (let i = 0; i < needsRank.length; i += BATCH) {
         const batch = needsRank.slice(i, i + BATCH);
@@ -129,14 +130,13 @@ export default function PollPage() {
           const res = await fetch(`https://boardgamegeek.com/xmlapi2/thing?id=${ids}&stats=1`);
           const xml = await res.text();
           if (!res.ok) {
-            setBggResult({ updated: saved.length, remaining, error: true, detail: `HTTP ${res.status}: ${xml.slice(0, 120)}` });
+            earlyExit = { error: true, detail: `HTTP ${res.status}: ${xml.slice(0, 200)}` };
             break;
           }
           const doc = new DOMParser().parseFromString(xml, 'text/xml');
           const items = doc.querySelectorAll('item');
           if (items.length === 0) {
-            // Likely got HTML (Cloudflare challenge) instead of XML
-            setBggResult({ updated: saved.length, remaining, error: true, detail: `No <item> in response (first 120 chars: ${xml.slice(0, 120)})` });
+            earlyExit = { error: true, detail: `No <item> in response. Body starts: ${xml.slice(0, 200)}` };
             break;
           }
           items.forEach(el => {
@@ -151,10 +151,15 @@ export default function PollPage() {
             }
           });
         } catch (e) {
-          setBggResult({ updated: saved.length, remaining, error: true, detail: String(e) });
+          earlyExit = { error: true, detail: String(e) };
           break;
         }
         if (i + BATCH < needsRank.length) await new Promise(r => setTimeout(r, 700));
+      }
+
+      if (earlyExit) {
+        setBggResult({ updated: saved.length, remaining, ...earlyExit });
+        return;
       }
 
       // Step 3: save fetched ranks back to the server
