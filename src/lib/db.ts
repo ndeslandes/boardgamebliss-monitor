@@ -50,8 +50,11 @@ function readStore(): Store {
   try {
     const raw = JSON.parse(fs.readFileSync(STORE_FILE, 'utf-8'));
     return { wishlist: [], ...raw };
-  } catch {
-    return { collections: [], polls: [], wishlist: [] };
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { collections: [], polls: [], wishlist: [] };
+    }
+    throw err;
   }
 }
 

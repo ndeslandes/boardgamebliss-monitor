@@ -43,8 +43,11 @@ function read(): ProductStore {
   try {
     const raw = JSON.parse(fs.readFileSync(PRODUCTS_FILE, 'utf-8'));
     return { lastSyncedAt: null, byHandle: {}, ...raw };
-  } catch {
-    return { lastSyncedAt: null, byHandle: {} };
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { lastSyncedAt: null, byHandle: {} };
+    }
+    throw err;
   }
 }
 
