@@ -43,7 +43,7 @@ export default function PollPage() {
   const startRef = useRef<number | null>(null);
   const pollingRef = useRef(false);
   const [bggSyncing, setBggSyncing] = useState(false);
-  const [bggResult, setBggResult] = useState<{ updated: number; remaining: number; error?: boolean } | null>(null);
+  const [bggResult, setBggResult] = useState<{ updated: number; remaining: number; error?: boolean; detail?: string } | null>(null);
 
   const loadHistory = useCallback(async (storeId: string) => {
     const res = await fetch(`/api/${storeId}/collections`);
@@ -127,10 +127,19 @@ export default function PollPage() {
         try {
           const ids = Array.from(idToHandle.keys()).join(',');
           const res = await fetch(`https://boardgamegeek.com/xmlapi2/thing?id=${ids}&stats=1`);
-          if (!res.ok) { setBggResult({ updated: saved.length, remaining, error: true }); break; }
           const xml = await res.text();
+          if (!res.ok) {
+            setBggResult({ updated: saved.length, remaining, error: true, detail: `HTTP ${res.status}: ${xml.slice(0, 120)}` });
+            break;
+          }
           const doc = new DOMParser().parseFromString(xml, 'text/xml');
-          doc.querySelectorAll('item').forEach(el => {
+          const items = doc.querySelectorAll('item');
+          if (items.length === 0) {
+            // Likely got HTML (Cloudflare challenge) instead of XML
+            setBggResult({ updated: saved.length, remaining, error: true, detail: `No <item> in response (first 120 chars: ${xml.slice(0, 120)})` });
+            break;
+          }
+          items.forEach(el => {
             const id = parseInt(el.getAttribute('id') ?? '0', 10);
             const handle = idToHandle.get(id);
             if (!handle) return;
@@ -141,7 +150,10 @@ export default function PollPage() {
               if (!isNaN(rank)) saved.push({ handle, bggRank: rank });
             }
           });
-        } catch { break; }
+        } catch (e) {
+          setBggResult({ updated: saved.length, remaining, error: true, detail: String(e) });
+          break;
+        }
         if (i + BATCH < needsRank.length) await new Promise(r => setTimeout(r, 700));
       }
 
@@ -211,9 +223,9 @@ export default function PollPage() {
               {bggSyncing ? 'Fetching…' : 'Sync BGG Ranks'}
             </button>
             {bggResult && !bggSyncing && (
-              <span className="text-xs text-gray-500">
+              <span className="text-xs text-gray-500 max-w-sm truncate" title={bggResult.detail}>
                 {bggResult.error
-                  ? <span className="text-red-400">BGG unreachable</span>
+                  ? <span className="text-red-400">{bggResult.detail ?? 'BGG unreachable'}</span>
                   : bggResult.updated === 0 && bggResult.remaining === 0
                   ? 'all ranks up to date'
                   : `+${bggResult.updated} fetched${bggResult.remaining > 0 ? `, ${bggResult.remaining} remaining` : ''}`}
