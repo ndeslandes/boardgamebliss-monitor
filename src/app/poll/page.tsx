@@ -42,6 +42,8 @@ export default function PollPage() {
   const [elapsed, setElapsed] = useState(0);
   const startRef = useRef<number | null>(null);
   const pollingRef = useRef(false);
+  const [bggSyncing, setBggSyncing] = useState(false);
+  const [bggResult, setBggResult] = useState<{ updated: number; remaining: number } | null>(null);
 
   const loadHistory = useCallback(async (storeId: string) => {
     const res = await fetch(`/api/${storeId}/collections`);
@@ -94,6 +96,21 @@ export default function PollPage() {
     return () => clearInterval(id);
   }, [progress, activeStore]);
 
+  async function syncBggRanks() {
+    if (bggSyncing) return;
+    setBggSyncing(true);
+    setBggResult(null);
+    try {
+      const res = await fetch(`/api/${activeStore}/sync-bgg-ranks`, { method: 'POST' });
+      const data = await res.json();
+      setBggResult({ updated: data.updated ?? 0, remaining: data.remaining ?? 0 });
+    } catch {
+      setBggResult({ updated: 0, remaining: -1 });
+    } finally {
+      setBggSyncing(false);
+    }
+  }
+
   async function runPoll() {
     if (pollingRef.current) return;
     startRef.current = Date.now();
@@ -135,13 +152,31 @@ export default function PollPage() {
             <Link href="/" className="text-gray-600 hover:text-gray-300 text-sm">← Dashboard</Link>
             <h1 className="text-xl font-semibold text-white">Sync</h1>
           </div>
-          <button
-            onClick={runPoll}
-            disabled={running}
-            className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors min-w-[10rem] text-center"
-          >
-            {running ? 'Running…' : 'Check Now'}
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={syncBggRanks}
+              disabled={bggSyncing || running}
+              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors text-orange-400 hover:text-orange-300"
+            >
+              {bggSyncing ? 'Fetching…' : 'Sync BGG Ranks'}
+            </button>
+            {bggResult && !bggSyncing && (
+              <span className="text-xs text-gray-500">
+                {bggResult.remaining === -1
+                  ? 'error'
+                  : bggResult.updated === 0 && bggResult.remaining === 0
+                  ? 'all ranks up to date'
+                  : `+${bggResult.updated} fetched${bggResult.remaining > 0 ? `, ${bggResult.remaining} remaining` : ''}`}
+              </span>
+            )}
+            <button
+              onClick={runPoll}
+              disabled={running}
+              className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors min-w-[10rem] text-center"
+            >
+              {running ? 'Running…' : 'Check Now'}
+            </button>
+          </div>
         </div>
 
         {/* Store tabs */}
@@ -149,7 +184,7 @@ export default function PollPage() {
           {STORES.map(s => (
             <button
               key={s.id}
-              onClick={() => { setActiveStore(s.id); setShowAll(false); }}
+              onClick={() => { setActiveStore(s.id); setShowAll(false); setBggResult(null); }}
               className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                 activeStore === s.id
                   ? 'border-blue-500 text-white'
