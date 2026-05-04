@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getWishlist, toggleWishlist } from '@/lib/db';
+import { getWishlist, toggleWishlist } from '@/lib/db-wishlist';
 
 export async function GET() {
   return NextResponse.json({ wishlist: getWishlist() });

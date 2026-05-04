@@ -1,3 +1,5 @@
+import { getStore } from './stores';
+
 export interface ShopifyVariant {
   id: number;
   title: string;
@@ -30,13 +32,12 @@ export interface ShopifyCollection {
   products_count: number;
 }
 
-const GAP_MS = 1500; // minimum gap between any two Shopify requests (process-wide)
+const GAP_MS = 1500;
 
 function sleep(ms: number) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-// Global serialized queue — one Shopify request at a time, GAP_MS between each
 let _chain: Promise<unknown> = Promise.resolve();
 
 function enqueue<T>(task: () => Promise<T>): Promise<T> {
@@ -45,7 +46,6 @@ function enqueue<T>(task: () => Promise<T>): Promise<T> {
   return p;
 }
 
-// Raw fetch with in-place retry (no re-enqueue — must be called from inside enqueue)
 async function rawFetch(url: string, attempt = 0): Promise<Response> {
   const res = await fetch(url, { headers: { Accept: 'application/json' }, cache: 'no-store', signal: AbortSignal.timeout(30000) });
   if (res.status === 429) {
@@ -61,14 +61,13 @@ function shopifyFetch(url: string): Promise<Response> {
   return enqueue(() => rawFetch(url));
 }
 
-export async function fetchCollectionProducts(handle: string): Promise<ShopifyProduct[]> {
+export async function fetchCollectionProducts(storeId: string, handle: string): Promise<ShopifyProduct[]> {
+  const { baseUrl } = getStore(storeId);
   const all: ShopifyProduct[] = [];
   let page = 1;
 
   while (true) {
-    const res = await shopifyFetch(
-      `https://www.boardgamebliss.com/collections/${handle}/products.json?limit=250&page=${page}`
-    );
+    const res = await shopifyFetch(`${baseUrl}/collections/${handle}/products.json?limit=250&page=${page}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const { products } = await res.json();
     all.push(...products);
@@ -89,21 +88,13 @@ export function countAvailability(products: ShopifyProduct[]): { available: numb
   return { available, outOfStock };
 }
 
-export async function fetchCollectionProductCounts(
-  handle: string
-): Promise<{ available: number; outOfStock: number }> {
-  const products = await fetchCollectionProducts(handle);
-  return countAvailability(products);
-}
-
-export async function fetchAllCollections(onPage?: (fetched: number) => void): Promise<ShopifyCollection[]> {
+export async function fetchAllCollections(storeId: string, onPage?: (fetched: number) => void): Promise<ShopifyCollection[]> {
+  const { baseUrl } = getStore(storeId);
   const all: ShopifyCollection[] = [];
   let page = 1;
 
   while (true) {
-    const res = await shopifyFetch(
-      `https://www.boardgamebliss.com/collections.json?limit=250&page=${page}`
-    );
+    const res = await shopifyFetch(`${baseUrl}/collections.json?limit=250&page=${page}`);
     if (!res.ok) throw new Error(`HTTP ${res.status} on page ${page}`);
 
     const { collections }: { collections: ShopifyCollection[] } = await res.json();

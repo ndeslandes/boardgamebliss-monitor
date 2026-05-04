@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { timeAgo } from '@/lib/utils';
 
 interface Collection {
+  storeId: string;
+  storeName: string;
   shopifyId: number;
   handle: string;
   title: string;
@@ -18,6 +20,8 @@ interface Collection {
 }
 
 interface PollEntry {
+  storeId: string;
+  storeName: string;
   polledAt: string;
   totalCollections: number;
   newCollections: number;
@@ -25,6 +29,7 @@ interface PollEntry {
 }
 
 interface WishlistItem {
+  storeId: string;
   productHandle: string;
   productTitle: string;
   vendor: string;
@@ -40,6 +45,38 @@ interface Data {
   history: PollEntry[];
   wishlist: WishlistItem[];
 }
+
+const STORE_COLORS: Record<string, string> = {
+  boardgamebliss: 'bg-blue-900/60 text-blue-300',
+  '401games': 'bg-orange-900/60 text-orange-300',
+};
+
+function StoreBadge({ storeId, storeName }: { storeId: string; storeName: string }) {
+  const cls = STORE_COLORS[storeId] ?? 'bg-gray-800 text-gray-400';
+  const short = storeId === 'boardgamebliss' ? 'BGB' : storeName;
+  return <span className={`px-1.5 py-0.5 text-xs font-medium rounded shrink-0 ${cls}`}>{short}</span>;
+}
+
+function TypeBadge({ handle, storeId }: { handle: string; storeId: string }) {
+  if (storeId === 'boardgamebliss') {
+    if (handle.startsWith('restock-'))
+      return <span className="px-1.5 py-0.5 text-xs font-medium bg-blue-900/60 text-blue-300 rounded">restock</span>;
+    if (handle.startsWith('new-'))
+      return <span className="px-1.5 py-0.5 text-xs font-medium bg-purple-900/60 text-purple-300 rounded">new</span>;
+  }
+  if (storeId === '401games') {
+    if (handle === 'board-game-restocks')
+      return <span className="px-1.5 py-0.5 text-xs font-medium bg-blue-900/60 text-blue-300 rounded">restock</span>;
+    if (handle === 'new-releases')
+      return <span className="px-1.5 py-0.5 text-xs font-medium bg-purple-900/60 text-purple-300 rounded">new</span>;
+  }
+  return null;
+}
+
+const STORE_DOMAINS: Record<string, string> = {
+  boardgamebliss: 'https://www.boardgamebliss.com',
+  '401games': 'https://store.401games.ca',
+};
 
 const COLLECTION_LIMIT = 20;
 
@@ -62,14 +99,15 @@ function CollectionTable({ collections }: { collections: Collection[] }) {
         <tbody className="divide-y divide-gray-800/60">
           {visible.map(col => (
             <tr
-              key={col.shopifyId}
+              key={`${col.storeId}:${col.shopifyId}`}
               className={`hover:bg-gray-800/40 transition-colors ${col.isNew ? 'bg-emerald-950/20' : ''}`}
             >
               <td className="px-4 py-3">
                 <div className="flex items-center gap-2">
-                  <TypeBadge handle={col.handle} />
+                  <StoreBadge storeId={col.storeId} storeName={col.storeName} />
+                  <TypeBadge handle={col.handle} storeId={col.storeId} />
                   <Link
-                    href={`/collections/${col.handle}`}
+                    href={`/collections/${col.storeId}/${col.handle}`}
                     className="text-blue-400 hover:text-blue-300 hover:underline"
                   >
                     {col.title}
@@ -78,11 +116,11 @@ function CollectionTable({ collections }: { collections: Collection[] }) {
                     <span className="px-1.5 py-0.5 text-xs font-medium bg-emerald-900 text-emerald-300 rounded">NEW</span>
                   )}
                   <a
-                    href={`https://www.boardgamebliss.com/collections/${col.handle}`}
+                    href={`${STORE_DOMAINS[col.storeId]}/collections/${col.handle}`}
                     target="_blank"
                     rel="noreferrer"
                     className="text-gray-600 hover:text-gray-400 text-xs"
-                    title="View on boardgamebliss.com"
+                    title={`View on ${col.storeName}`}
                   >↗</a>
                 </div>
               </td>
@@ -121,14 +159,6 @@ function CollectionTable({ collections }: { collections: Collection[] }) {
   );
 }
 
-function TypeBadge({ handle }: { handle: string }) {
-  if (handle.startsWith('restock-'))
-    return <span className="px-1.5 py-0.5 text-xs font-medium bg-blue-900/60 text-blue-300 rounded">restock</span>;
-  if (handle.startsWith('new-'))
-    return <span className="px-1.5 py-0.5 text-xs font-medium bg-purple-900/60 text-purple-300 rounded">new</span>;
-  return null;
-}
-
 export default function Dashboard() {
   const [data, setData] = useState<Data | null>(null);
   const [marking, setMarking] = useState(false);
@@ -152,16 +182,17 @@ export default function Dashboard() {
     setMarking(false);
   }
 
-  async function removeFromWishlist(productHandle: string, productTitle: string, collectionHandle: string, price: string, vendor: string) {
-    if (removingRef.current.has(productHandle)) return;
-    removingRef.current.add(productHandle);
-    setData(prev => prev ? { ...prev, wishlist: prev.wishlist.filter(w => w.productHandle !== productHandle) } : prev);
+  async function removeFromWishlist(item: WishlistItem) {
+    const key = `${item.storeId}:${item.productHandle}`;
+    if (removingRef.current.has(key)) return;
+    removingRef.current.add(key);
+    setData(prev => prev ? { ...prev, wishlist: prev.wishlist.filter(w => !(w.storeId === item.storeId && w.productHandle === item.productHandle)) } : prev);
     await fetch('/api/wishlist', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ productHandle, productTitle, collectionHandle, price, vendor }),
+      body: JSON.stringify({ storeId: item.storeId, productHandle: item.productHandle, productTitle: item.productTitle, collectionHandle: item.collectionHandle, price: item.price, vendor: item.vendor }),
     });
-    removingRef.current.delete(productHandle);
+    removingRef.current.delete(key);
   }
 
   if (!data) {
@@ -182,13 +213,12 @@ export default function Dashboard() {
     <main className="min-h-screen bg-gray-950 text-gray-100">
       <div className="max-w-4xl mx-auto px-6 py-8 space-y-8">
 
-        {/* Header */}
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-xl font-semibold text-white">BoardGameBliss Monitor</h1>
+            <h1 className="text-xl font-semibold text-white">Board Game Monitor</h1>
             <p className="text-gray-500 text-sm mt-1">
               {lastPoll
-                ? <>Last synced <span className="text-gray-400">{timeAgo(lastPoll.polledAt)}</span> &middot; {lastPoll.totalCollections.toLocaleString()} collections</>
+                ? <>Last synced <span className="text-gray-400">{timeAgo(lastPoll.polledAt)}</span> &middot; {lastPoll.storeName}</>
                 : 'No sync yet'}
             </p>
           </div>
@@ -211,7 +241,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* New tracked collections alert */}
         {newTracked.length > 0 && (
           <div className="p-4 bg-emerald-950/50 border border-emerald-700/50 rounded-xl">
             <div className="flex items-center gap-2 mb-3">
@@ -222,11 +251,12 @@ export default function Dashboard() {
             </div>
             <div className="space-y-2">
               {newTracked.map(col => (
-                <div key={col.shopifyId} className="flex items-center justify-between gap-4">
+                <div key={`${col.storeId}:${col.shopifyId}`} className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-2">
-                    <TypeBadge handle={col.handle} />
+                    <StoreBadge storeId={col.storeId} storeName={col.storeName} />
+                    <TypeBadge handle={col.handle} storeId={col.storeId} />
                     <Link
-                      href={`/collections/${col.handle}`}
+                      href={`/collections/${col.storeId}/${col.handle}`}
                       className="text-emerald-300 hover:text-emerald-200 hover:underline"
                     >
                       {col.title}
@@ -241,7 +271,6 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Other new collections */}
         {otherNew.length > 0 && (
           <div className="p-4 bg-yellow-950/30 border border-yellow-800/40 rounded-xl">
             <span className="text-yellow-500 font-medium text-sm uppercase tracking-wide block mb-3">
@@ -249,15 +278,18 @@ export default function Dashboard() {
             </span>
             <div className="space-y-1">
               {otherNew.map(col => (
-                <div key={col.shopifyId} className="flex items-center justify-between gap-4">
-                  <a
-                    href={`https://www.boardgamebliss.com/collections/${col.handle}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-yellow-300 hover:underline text-sm"
-                  >
-                    {col.title}
-                  </a>
+                <div key={`${col.storeId}:${col.shopifyId}`} className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-2">
+                    <StoreBadge storeId={col.storeId} storeName={col.storeName} />
+                    <a
+                      href={`${STORE_DOMAINS[col.storeId]}/collections/${col.handle}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-yellow-300 hover:underline text-sm"
+                    >
+                      {col.title}
+                    </a>
+                  </div>
                   <span className="text-gray-600 text-xs shrink-0">{timeAgo(col.firstSeenAt)}</span>
                 </div>
               ))}
@@ -265,7 +297,6 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Wishlist */}
         {data.wishlist.length > 0 && (
           <div>
             <h2 className="text-sm font-medium text-gray-400 uppercase tracking-wide mb-3">
@@ -284,10 +315,10 @@ export default function Dashboard() {
                 </thead>
                 <tbody className="divide-y divide-gray-800/60">
                   {data.wishlist.map(item => (
-                    <tr key={item.productHandle} className={`hover:bg-gray-800/30 ${item.available === true ? 'bg-emerald-950/10' : ''}`}>
+                    <tr key={`${item.storeId}:${item.productHandle}`} className={`hover:bg-gray-800/30 ${item.available === true ? 'bg-emerald-950/10' : ''}`}>
                       <td className="px-4 py-3">
                         <a
-                          href={`https://www.boardgamebliss.com/products/${item.productHandle}`}
+                          href={`${STORE_DOMAINS[item.storeId]}/products/${item.productHandle}`}
                           target="_blank"
                           rel="noreferrer"
                           className="text-blue-400 hover:text-blue-300 hover:underline font-medium"
@@ -297,12 +328,15 @@ export default function Dashboard() {
                         {item.vendor && <p className="text-gray-600 text-xs mt-0.5">{item.vendor}</p>}
                       </td>
                       <td className="px-4 py-3">
-                        <Link
-                          href={`/collections/${item.collectionHandle}`}
-                          className="text-gray-500 hover:text-gray-300 text-xs hover:underline capitalize"
-                        >
-                          {item.collectionHandle.replace(/-/g, ' ')}
-                        </Link>
+                        <div className="flex items-center gap-1.5">
+                          <StoreBadge storeId={item.storeId} storeName={item.storeId} />
+                          <Link
+                            href={`/collections/${item.storeId}/${item.collectionHandle}`}
+                            className="text-gray-500 hover:text-gray-300 text-xs hover:underline capitalize"
+                          >
+                            {item.collectionHandle.replace(/-/g, ' ')}
+                          </Link>
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-right text-gray-400 text-xs tabular-nums">
                         ${parseFloat(item.price).toFixed(2)}
@@ -314,7 +348,7 @@ export default function Dashboard() {
                       </td>
                       <td className="px-3 py-3 text-center">
                         <button
-                          onClick={() => removeFromWishlist(item.productHandle, item.productTitle, item.collectionHandle, item.price, item.vendor)}
+                          onClick={() => removeFromWishlist(item)}
                           className="text-gray-700 hover:text-rose-400 transition-colors text-base leading-none"
                           title="Remove from wishlist"
                         >
@@ -329,7 +363,6 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Collections */}
         <div>
           <h2 className="text-sm font-medium text-gray-400 uppercase tracking-wide mb-3">
             Restocks &amp; New Arrivals{available.length > 0 && <span className="text-gray-600 font-normal normal-case ml-1">({available.length})</span>}

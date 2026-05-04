@@ -2,8 +2,9 @@ import fs from 'fs';
 import path from 'path';
 import type { ShopifyProduct } from './shopify';
 
-const DATA_DIR = path.join(process.cwd(), 'data');
-const PRODUCTS_FILE = path.join(DATA_DIR, 'products.json');
+const DATA_BASE = path.join(process.cwd(), 'data');
+
+function productsFile(storeId: string) { return path.join(DATA_BASE, storeId, 'products.json'); }
 
 export interface CachedVariant {
   id: number;
@@ -39,9 +40,9 @@ interface ProductStore {
   byHandle: Record<string, CachedProduct>;
 }
 
-function read(): ProductStore {
+function read(storeId: string): ProductStore {
   try {
-    const raw = JSON.parse(fs.readFileSync(PRODUCTS_FILE, 'utf-8'));
+    const raw = JSON.parse(fs.readFileSync(productsFile(storeId), 'utf-8'));
     return { lastSyncedAt: null, byHandle: {}, ...raw };
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -51,17 +52,16 @@ function read(): ProductStore {
   }
 }
 
-function write(store: ProductStore): void {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(PRODUCTS_FILE, JSON.stringify(store));
+function write(storeId: string, store: ProductStore): void {
+  const dir = path.join(DATA_BASE, storeId);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(productsFile(storeId), JSON.stringify(store));
 }
 
 function parseBggUrl(html: string | null | undefined): string | null {
   if (!html) return null;
-  // Hidden div: <div id="bgg-url" style="display: none;">291453/scout</div>
   const m = html.match(/id="bgg-url"[^>]*>(\d+\/[^<]+)</);
   if (m) return `https://boardgamegeek.com/boardgame/${m[1]}`;
-  // Fallback: full URL in bgg-forum-url div, strip /forums/63
   const m2 = html.match(/id="bgg-forum-url"[^>]*>(https?:\/\/[^<]+)</);
   if (m2) return m2[1].replace(/\/forums\/\d+$/, '');
   return null;
@@ -106,18 +106,18 @@ function toEntry(p: ShopifyProduct, collectionHandle: string, existing: CachedPr
   };
 }
 
-export function upsertCollectionProducts(collectionHandle: string, raw: ShopifyProduct[]): void {
-  const store = read();
+export function upsertCollectionProducts(storeId: string, collectionHandle: string, raw: ShopifyProduct[]): void {
+  const store = read(storeId);
   const now = new Date().toISOString();
   for (const p of raw) {
     store.byHandle[p.handle] = toEntry(p, collectionHandle, store.byHandle[p.handle], now);
   }
   store.lastSyncedAt = now;
-  write(store);
+  write(storeId, store);
 }
 
-export function batchUpsertProducts(batches: { collectionHandle: string; products: ShopifyProduct[] }[]): void {
-  const store = read();
+export function batchUpsertProducts(storeId: string, batches: { collectionHandle: string; products: ShopifyProduct[] }[]): void {
+  const store = read(storeId);
   const now = new Date().toISOString();
   for (const { collectionHandle, products } of batches) {
     for (const p of products) {
@@ -125,15 +125,16 @@ export function batchUpsertProducts(batches: { collectionHandle: string; product
     }
   }
   store.lastSyncedAt = now;
-  write(store);
+  write(storeId, store);
 }
 
 export function searchProducts(
+  storeId: string,
   query: string,
   filter: 'all' | 'available' | 'soldout' = 'all',
   limit = 100
 ): { products: CachedProduct[]; total: number; lastSyncedAt: string | null } {
-  const store = read();
+  const store = read(storeId);
   const all = Object.values(store.byHandle);
 
   const q = query.toLowerCase().trim();
@@ -158,17 +159,17 @@ export function searchProducts(
   return { products: results.slice(0, limit), total: results.length, lastSyncedAt: store.lastSyncedAt };
 }
 
-export function getCollectionProducts(handle: string): CachedProduct[] {
-  const all = Object.values(read().byHandle);
+export function getCollectionProducts(storeId: string, handle: string): CachedProduct[] {
+  const all = Object.values(read(storeId).byHandle);
   return all
     .filter(p => p.collectionHandles.includes(handle))
     .map(p => ({ ...p, variants: p.variants ?? [] }));
 }
 
-export function getLastSyncedAt(): string | null {
-  return read().lastSyncedAt;
+export function getLastSyncedAt(storeId: string): string | null {
+  return read(storeId).lastSyncedAt;
 }
 
-export function getProductCount(): number {
-  return Object.keys(read().byHandle).length;
+export function getProductCount(storeId: string): number {
+  return Object.keys(read(storeId).byHandle).length;
 }

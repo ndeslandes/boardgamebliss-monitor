@@ -4,6 +4,11 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { timeAgo, fmtDuration } from '@/lib/utils';
 
+const STORES = [
+  { id: 'boardgamebliss', name: 'BoardGameBliss' },
+  { id: '401games', name: '401 Games' },
+];
+
 interface PollEntry {
   polledAt: string;
   totalCollections: number;
@@ -30,21 +35,21 @@ function fmt(iso: string) {
 const HISTORY_LIMIT = 20;
 
 export default function PollPage() {
-  const [history, setHistory] = useState<PollEntry[]>([]);
-  const [progress, setProgress] = useState<SyncProgress>({ phase: 'idle', current: 0, total: 0, currentHandle: '', updatedCount: 0 });
+  const [activeStore, setActiveStore] = useState(STORES[0].id);
+  const [history, setHistory] = useState<Record<string, PollEntry[]>>({});
+  const [progress, setProgress] = useState<Record<string, SyncProgress>>({});
   const [showAll, setShowAll] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const startRef = useRef<number | null>(null);
   const pollingRef = useRef(false);
 
-  const loadHistory = useCallback(async () => {
-    const res = await fetch('/api/collections');
+  const loadHistory = useCallback(async (storeId: string) => {
+    const res = await fetch(`/api/${storeId}/collections`);
     const data = await res.json();
-    setHistory(data.history ?? []);
+    setHistory(prev => ({ ...prev, [storeId]: data.history ?? [] }));
   }, []);
 
-  // Poll server-side progress while a sync is running
-  const pollProgress = useCallback(async () => {
+  const pollProgress = useCallback(async (storeId: string) => {
     if (pollingRef.current) return;
     pollingRef.current = true;
     if (startRef.current === null) startRef.current = Date.now();
@@ -53,10 +58,10 @@ export default function PollPage() {
       await new Promise(r => setTimeout(r, 800));
       try {
         const res = await fetch('/api/poll-progress');
-        const p: SyncProgress = await res.json();
-        setProgress(p);
+        const all: Record<string, SyncProgress> = await res.json();
+        setProgress(all);
         setElapsed(Math.floor((Date.now() - startRef.current!) / 1000));
-        if (p.phase === 'idle') break;
+        if (!all[storeId] || all[storeId].phase === 'idle') break;
       } catch {
         break;
       }
@@ -65,60 +70,60 @@ export default function PollPage() {
     pollingRef.current = false;
     startRef.current = null;
     setElapsed(0);
-    await loadHistory();
+    await loadHistory(storeId);
   }, [loadHistory]);
 
-  // On mount: check if a sync is already running (e.g. after page reload)
   useEffect(() => {
-    loadHistory();
+    STORES.forEach(s => loadHistory(s.id));
     fetch('/api/poll-progress')
       .then(r => r.json())
-      .then((p: SyncProgress) => {
-        if (p.phase !== 'idle') {
-          setProgress(p);
-          pollProgress();
-        }
+      .then((all: Record<string, SyncProgress>) => {
+        setProgress(all);
+        STORES.forEach(s => {
+          if (all[s.id]?.phase !== 'idle') pollProgress(s.id);
+        });
       });
   }, [loadHistory, pollProgress]);
 
-  // Elapsed ticker (runs whenever progress phase is non-idle)
   useEffect(() => {
-    if (progress.phase === 'idle') return;
+    const p = progress[activeStore];
+    if (!p || p.phase === 'idle') return;
     const id = setInterval(() => {
       if (startRef.current !== null) setElapsed(Math.floor((Date.now() - startRef.current) / 1000));
     }, 500);
     return () => clearInterval(id);
-  }, [progress.phase]);
+  }, [progress, activeStore]);
 
   async function runPoll() {
     if (pollingRef.current) return;
     startRef.current = Date.now();
-    setProgress({ phase: 'collections', current: 0, total: 0, currentHandle: '', updatedCount: 0 });
-    pollProgress();
-
+    setProgress(prev => ({ ...prev, [activeStore]: { phase: 'collections', current: 0, total: 0, currentHandle: '', updatedCount: 0 } }));
+    pollProgress(activeStore);
     try {
-      await fetch('/api/poll', { method: 'POST' });
-      await fetch('/api/poll-counts', { method: 'POST' });
+      await fetch(`/api/${activeStore}/poll`, { method: 'POST' });
+      await fetch(`/api/${activeStore}/poll-counts`, { method: 'POST' });
     } catch (err) {
       console.error('Poll failed:', err);
     }
   }
 
-  const running = progress.phase !== 'idle';
-  const last = history[0];
-  const visible = showAll ? history : history.slice(0, HISTORY_LIMIT);
-  const hidden = history.length - HISTORY_LIMIT;
+  const p = progress[activeStore];
+  const running = p?.phase !== undefined && p.phase !== 'idle';
+  const storeHistory = history[activeStore] ?? [];
+  const last = storeHistory[0];
+  const visible = showAll ? storeHistory : storeHistory.slice(0, HISTORY_LIMIT);
+  const hidden = storeHistory.length - HISTORY_LIMIT;
 
-  const statusLabel = progress.phase === 'collections'
-    ? `Syncing collections${progress.current > 0 ? ` — ${progress.current.toLocaleString()} fetched` : '…'}`
-    : progress.phase === 'counts'
-    ? `Fetching stock counts${progress.total > 0
-        ? ` — ${progress.current} / ${progress.total}${progress.currentHandle ? ` · ${progress.currentHandle}` : ''}`
+  const statusLabel = p?.phase === 'collections'
+    ? `Syncing collections${p.current > 0 ? ` — ${p.current.toLocaleString()} fetched` : '…'}`
+    : p?.phase === 'counts'
+    ? `Fetching stock counts${p.total > 0
+        ? ` — ${p.current} / ${p.total}${p.currentHandle ? ` · ${p.currentHandle}` : ''}`
         : '…'}`
     : '';
 
-  const progressPct = progress.phase === 'counts' && progress.total > 0
-    ? Math.round((progress.current / progress.total) * 100)
+  const progressPct = p?.phase === 'counts' && p.total > 0
+    ? Math.round((p.current / p.total) * 100)
     : null;
 
   return (
@@ -139,8 +144,28 @@ export default function PollPage() {
           </button>
         </div>
 
+        {/* Store tabs */}
+        <div className="flex gap-1 border-b border-gray-800 -mb-4">
+          {STORES.map(s => (
+            <button
+              key={s.id}
+              onClick={() => { setActiveStore(s.id); setShowAll(false); }}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                activeStore === s.id
+                  ? 'border-blue-500 text-white'
+                  : 'border-transparent text-gray-500 hover:text-gray-300'
+              }`}
+            >
+              {s.name}
+              {progress[s.id]?.phase !== 'idle' && progress[s.id]?.phase !== undefined && (
+                <span className="ml-1.5 w-1.5 h-1.5 bg-blue-400 rounded-full inline-block animate-pulse" />
+              )}
+            </button>
+          ))}
+        </div>
+
         {last && (
-          <p className="text-gray-500 text-sm -mt-4">
+          <p className="text-gray-500 text-sm">
             Last synced <span className="text-gray-400">{timeAgo(last.polledAt)}</span>
             {' '}&middot; {last.totalCollections.toLocaleString()} collections
           </p>
@@ -155,10 +180,7 @@ export default function PollPage() {
             </div>
             {progressPct !== null ? (
               <div className="h-1.5 bg-blue-950 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-blue-500 rounded-full transition-all duration-500"
-                  style={{ width: `${progressPct}%` }}
-                />
+                <div className="h-full bg-blue-500 rounded-full transition-all duration-500" style={{ width: `${progressPct}%` }} />
               </div>
             ) : (
               <div className="h-1.5 bg-blue-950 rounded-full overflow-hidden">
@@ -170,7 +192,7 @@ export default function PollPage() {
 
         <div>
           <h2 className="text-sm font-medium text-gray-400 uppercase tracking-wide mb-3">History</h2>
-          {history.length === 0 ? (
+          {storeHistory.length === 0 ? (
             <p className="text-gray-600 text-sm">No history yet.</p>
           ) : (
             <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">

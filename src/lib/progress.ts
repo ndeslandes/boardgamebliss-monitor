@@ -6,8 +6,26 @@ export interface SyncProgress {
   updatedCount: number;
 }
 
-let _state: SyncProgress = { phase: 'idle', current: 0, total: 0, currentHandle: '', updatedCount: 0 };
+const _states = new Map<string, SyncProgress>();
 
-export function getProgress(): SyncProgress { return { ..._state }; }
-export function setProgress(p: Partial<SyncProgress>): void { Object.assign(_state, p); }
-export function resetProgress(): void { _state = { phase: 'idle', current: 0, total: 0, currentHandle: '', updatedCount: 0 }; }
+function defaultState(): SyncProgress {
+  return { phase: 'idle', current: 0, total: 0, currentHandle: '', updatedCount: 0 };
+}
+
+export function getProgress(storeId: string): SyncProgress {
+  return { ...(_states.get(storeId) ?? defaultState()) };
+}
+
+export function setProgress(storeId: string, p: Partial<SyncProgress>): void {
+  _states.set(storeId, { ...(_states.get(storeId) ?? defaultState()), ...p });
+}
+
+export function resetProgress(storeId: string): void {
+  _states.set(storeId, defaultState());
+}
+
+export function getAllProgress(): Record<string, SyncProgress> {
+  const result: Record<string, SyncProgress> = {};
+  for (const [id, state] of _states) result[id] = { ...state };
+  return result;
+}

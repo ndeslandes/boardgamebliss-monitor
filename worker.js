@@ -2,6 +2,8 @@ const cron = require('node-cron');
 
 const BASE = 'http://localhost:3000/api';
 
+const STORES = ['boardgamebliss', '401games'];
+
 async function fetchWithRetry(url) {
   for (let attempt = 1; attempt <= 5; attempt++) {
     try {
@@ -17,25 +19,31 @@ async function fetchWithRetry(url) {
   }
 }
 
-async function poll() {
+async function pollStore(storeId) {
   const ts = new Date().toLocaleString();
   try {
-    const data = await fetchWithRetry(`${BASE}/poll`);
+    const data = await fetchWithRetry(`${BASE}/${storeId}/poll`);
     if (!data.ok) {
-      console.error(`[worker ${ts}] Poll error: ${data.error}`);
+      console.error(`[worker ${ts}] [${storeId}] Poll error: ${data.error}`);
       return;
     }
     if (data.new > 0) {
-      console.log(`[worker ${ts}] NEW: ${data.new} new collection(s)! Total: ${data.total}`);
+      console.log(`[worker ${ts}] [${storeId}] NEW: ${data.new} new collection(s)! Total: ${data.total}`);
     } else {
-      console.log(`[worker ${ts}] No new collections. Total: ${data.total}`);
+      console.log(`[worker ${ts}] [${storeId}] No new collections. Total: ${data.total}`);
     }
 
-    console.log(`[worker ${ts}] Fetching product counts...`);
-    const counts = await fetchWithRetry(`${BASE}/poll-counts`);
-    console.log(`[worker ${ts}] Product counts updated for ${counts.updated} collections.`);
+    console.log(`[worker ${ts}] [${storeId}] Fetching product counts...`);
+    const counts = await fetchWithRetry(`${BASE}/${storeId}/poll-counts`);
+    console.log(`[worker ${ts}] [${storeId}] Product counts updated for ${counts.updated} collections.`);
   } catch (err) {
-    console.error(`[worker ${ts}] Poll failed: ${err.message}`);
+    console.error(`[worker ${ts}] [${storeId}] Poll failed: ${err.message}`);
+  }
+}
+
+async function poll() {
+  for (const storeId of STORES) {
+    await pollStore(storeId);
   }
 }
 

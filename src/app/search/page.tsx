@@ -4,6 +4,16 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { timeAgo } from '@/lib/utils';
 
+const STORES = [
+  { id: 'boardgamebliss', name: 'BoardGameBliss' },
+  { id: '401games', name: '401 Games' },
+];
+
+const STORE_DOMAINS: Record<string, string> = {
+  boardgamebliss: 'https://www.boardgamebliss.com',
+  '401games': 'https://store.401games.ca',
+};
+
 interface CachedProduct {
   handle: string;
   title: string;
@@ -24,6 +34,7 @@ interface CachedProduct {
 type Filter = 'all' | 'available' | 'soldout';
 
 export default function SearchPage() {
+  const [storeId, setStoreId] = useState(STORES[0].id);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [products, setProducts] = useState<CachedProduct[] | null>(null);
@@ -33,17 +44,16 @@ export default function SearchPage() {
   const [loading, setLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load wishlist once
   useEffect(() => {
     fetch('/api/wishlist')
       .then(r => r.json())
-      .then(d => setWishlist(new Set(d.wishlist.map((w: { productHandle: string }) => w.productHandle))));
+      .then(d => setWishlist(new Set(d.wishlist.map((w: { storeId: string; productHandle: string }) => `${w.storeId}:${w.productHandle}`))));
   }, []);
 
-  const runSearch = useCallback(async (q: string, f: Filter) => {
+  const runSearch = useCallback(async (sid: string, q: string, f: Filter) => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&filter=${f}&limit=200`);
+      const res = await fetch(`/api/${sid}/search?q=${encodeURIComponent(q)}&filter=${f}&limit=200`);
       const data = await res.json();
       setProducts(data.products ?? []);
       setTotal(data.total ?? 0);
@@ -56,32 +66,40 @@ export default function SearchPage() {
     }
   }, []);
 
-  // Initial load (empty search shows everything)
-  useEffect(() => { runSearch('', 'all'); }, [runSearch]);
+  useEffect(() => { runSearch(storeId, '', 'all'); }, [runSearch, storeId]);
+
+  function handleStoreChange(sid: string) {
+    setStoreId(sid);
+    setQuery('');
+    setFilter('all');
+    setProducts(null);
+  }
 
   function handleQueryChange(e: React.ChangeEvent<HTMLInputElement>) {
     const q = e.target.value;
     setQuery(q);
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => runSearch(q, filter), 250);
+    debounceRef.current = setTimeout(() => runSearch(storeId, q, filter), 250);
   }
 
   function handleFilterChange(f: Filter) {
     setFilter(f);
-    runSearch(query, f);
+    runSearch(storeId, query, f);
   }
 
   async function toggleWishlist(product: CachedProduct) {
-    const wasWishlisted = wishlist.has(product.handle);
+    const key = `${storeId}:${product.handle}`;
+    const wasWishlisted = wishlist.has(key);
     setWishlist(prev => {
       const next = new Set(prev);
-      wasWishlisted ? next.delete(product.handle) : next.add(product.handle);
+      wasWishlisted ? next.delete(key) : next.add(key);
       return next;
     });
     await fetch('/api/wishlist', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        storeId,
         productHandle: product.handle,
         productTitle: product.title,
         vendor: product.vendor,
@@ -91,11 +109,12 @@ export default function SearchPage() {
     });
   }
 
+  const domain = STORE_DOMAINS[storeId];
+
   return (
     <main className="min-h-screen bg-gray-950 text-gray-100">
       <div className="max-w-6xl mx-auto px-6 py-8">
 
-        {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-4">
             <Link href="/" className="text-gray-600 hover:text-gray-300 text-sm">← Dashboard</Link>
@@ -106,7 +125,23 @@ export default function SearchPage() {
           )}
         </div>
 
-        {/* Search + filters */}
+        {/* Store tabs */}
+        <div className="flex gap-1 border-b border-gray-800 mb-6">
+          {STORES.map(s => (
+            <button
+              key={s.id}
+              onClick={() => handleStoreChange(s.id)}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                storeId === s.id
+                  ? 'border-blue-500 text-white'
+                  : 'border-transparent text-gray-500 hover:text-gray-300'
+              }`}
+            >
+              {s.name}
+            </button>
+          ))}
+        </div>
+
         <div className="flex flex-wrap items-center gap-3 mb-6">
           <div className="relative flex-1 min-w-64">
             <input
@@ -141,15 +176,13 @@ export default function SearchPage() {
           )}
         </div>
 
-        {/* No cache yet */}
         {products !== null && products.length === 0 && !lastSyncedAt && (
           <div className="p-8 text-center text-gray-600 bg-gray-900 rounded-xl border border-gray-800">
             No product cache yet.{' '}
-            <Link href="/" className="text-blue-500 hover:underline">Go to the dashboard and click Check Now.</Link>
+            <Link href="/poll" className="text-blue-500 hover:underline">Go to Sync and click Check Now.</Link>
           </div>
         )}
 
-        {/* Results */}
         {products !== null && products.length > 0 && (
           <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-x-auto">
             <table className="w-full text-sm">
@@ -166,7 +199,8 @@ export default function SearchPage() {
               </thead>
               <tbody className="divide-y divide-gray-800/50">
                 {products.map(product => {
-                  const wishlisted = wishlist.has(product.handle);
+                  const key = `${storeId}:${product.handle}`;
+                  const wishlisted = wishlist.has(key);
                   const hasDiscount = product.compareAtPrice &&
                     parseFloat(product.compareAtPrice) > parseFloat(product.price);
                   const multiVariant = product.totalVariants > 1;
@@ -190,16 +224,12 @@ export default function SearchPage() {
                       <td className="px-4 py-3">
                         <div className="flex items-start gap-2">
                           {product.imageUrl && (
-                            <img
-                              src={product.imageUrl}
-                              alt={product.title}
-                              className="w-8 h-8 object-cover rounded shrink-0 mt-0.5"
-                            />
+                            <img src={product.imageUrl} alt={product.title} className="w-8 h-8 object-cover rounded shrink-0 mt-0.5" />
                           )}
                           <div>
                             <div className="flex items-center gap-1.5">
                               <a
-                                href={`https://www.boardgamebliss.com/products/${product.handle}`}
+                                href={`${domain}/products/${product.handle}`}
                                 target="_blank"
                                 rel="noreferrer"
                                 className="text-blue-400 hover:text-blue-300 hover:underline font-medium"
@@ -207,13 +237,8 @@ export default function SearchPage() {
                                 {product.title}
                               </a>
                               {product.bggUrl && (
-                                <a
-                                  href={product.bggUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="text-orange-500 hover:text-orange-400 text-xs font-medium shrink-0"
-                                  title="BoardGameGeek"
-                                >
+                                <a href={product.bggUrl} target="_blank" rel="noreferrer"
+                                  className="text-orange-500 hover:text-orange-400 text-xs font-medium shrink-0" title="BoardGameGeek">
                                   BGG
                                 </a>
                               )}
@@ -221,30 +246,21 @@ export default function SearchPage() {
                             {product.tags.length > 0 && (
                               <div className="flex flex-wrap gap-1 mt-1">
                                 {product.tags.slice(0, 4).map(tag => (
-                                  <span key={tag} className="px-1.5 py-0.5 text-xs bg-gray-800 text-gray-600 rounded">
-                                    {tag}
-                                  </span>
+                                  <span key={tag} className="px-1.5 py-0.5 text-xs bg-gray-800 text-gray-600 rounded">{tag}</span>
                                 ))}
-                                {product.tags.length > 4 && (
-                                  <span className="text-xs text-gray-700">+{product.tags.length - 4}</span>
-                                )}
+                                {product.tags.length > 4 && <span className="text-xs text-gray-700">+{product.tags.length - 4}</span>}
                               </div>
                             )}
                           </div>
                         </div>
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-400">{product.vendor || '—'}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-gray-500">
-                        {product.skus[0] || <span className="text-gray-700">—</span>}
-                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-gray-500">{product.skus[0] || <span className="text-gray-700">—</span>}</td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap gap-1">
                           {product.collectionHandles.map(h => (
-                            <Link
-                              key={h}
-                              href={`/collections/${h}`}
-                              className="px-1.5 py-0.5 text-xs bg-gray-800 text-gray-400 hover:text-gray-200 rounded capitalize"
-                            >
+                            <Link key={h} href={`/collections/${storeId}/${h}`}
+                              className="px-1.5 py-0.5 text-xs bg-gray-800 text-gray-400 hover:text-gray-200 rounded capitalize">
                               {h.replace(/-/g, ' ')}
                             </Link>
                           ))}
@@ -253,17 +269,12 @@ export default function SearchPage() {
                       <td className="px-4 py-3 text-right text-gray-300 whitespace-nowrap">
                         ${parseFloat(product.price).toFixed(2)}
                         {hasDiscount && (
-                          <span className="ml-1.5 text-gray-600 line-through text-xs">
-                            ${parseFloat(product.compareAtPrice!).toFixed(2)}
-                          </span>
+                          <span className="ml-1.5 text-gray-600 line-through text-xs">${parseFloat(product.compareAtPrice!).toFixed(2)}</span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-right">
                         {multiVariant ? (
-                          <span className="text-xs text-gray-400">
-                            {product.availableVariants}
-                            <span className="text-gray-600">/{product.totalVariants}</span>
-                          </span>
+                          <span className="text-xs text-gray-400">{product.availableVariants}<span className="text-gray-600">/{product.totalVariants}</span></span>
                         ) : (
                           <span className={`text-xs font-medium ${product.available ? 'text-emerald-400' : 'text-gray-600'}`}>
                             {product.available ? 'in stock' : 'sold out'}

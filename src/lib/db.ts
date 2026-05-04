@@ -1,8 +1,11 @@
 import fs from 'fs';
 import path from 'path';
+import { getStore } from './stores';
 
-const DATA_DIR = path.join(process.cwd(), 'data');
-const STORE_FILE = path.join(DATA_DIR, 'store.json');
+const DATA_BASE = path.join(process.cwd(), 'data');
+
+function storeDir(storeId: string) { return path.join(DATA_BASE, storeId); }
+function storeFile(storeId: string) { return path.join(storeDir(storeId), 'store.json'); }
 
 export interface StoredCollection {
   shopifyId: number;
@@ -31,79 +34,52 @@ export interface PollEntry {
   updatedCollections?: number;
 }
 
-export interface WishlistItem {
-  productHandle: string;
-  productTitle: string;
-  vendor: string;
-  price: string;
-  collectionHandle: string;
-  addedAt: string;
-}
-
-interface Store {
+interface StoreData {
   collections: StoredCollection[];
   polls: PollEntry[];
-  wishlist: WishlistItem[];
 }
 
-function readStore(): Store {
+function readStoreData(storeId: string): StoreData {
   try {
-    const raw = JSON.parse(fs.readFileSync(STORE_FILE, 'utf-8'));
-    return { wishlist: [], ...raw };
+    const raw = JSON.parse(fs.readFileSync(storeFile(storeId), 'utf-8'));
+    return { collections: [], polls: [], ...raw };
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { collections: [], polls: [], wishlist: [] };
+      return { collections: [], polls: [] };
     }
     throw err;
   }
 }
 
-function writeStore(store: Store): void {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(STORE_FILE, JSON.stringify(store, null, 2));
+function writeStoreData(storeId: string, data: StoreData): void {
+  const dir = storeDir(storeId);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(storeFile(storeId), JSON.stringify(data, null, 2));
 }
 
-function isTracked(handle: string) {
-  return handle.startsWith('restock-') || handle.startsWith('new-');
-}
-
-export function getTrackedCollections(): StoredCollection[] {
-  return readStore()
+export function getTrackedCollections(storeId: string): StoredCollection[] {
+  const { isTracked } = getStore(storeId);
+  return readStoreData(storeId)
     .collections.filter(c => isTracked(c.handle))
     .sort((a, b) => (b.publishedAt ?? b.firstSeenAt).localeCompare(a.publishedAt ?? a.firstSeenAt));
 }
 
-export function getNewUntracked(): StoredCollection[] {
-  return readStore().collections.filter(c => c.isNew && !isTracked(c.handle));
+export function getNewUntracked(storeId: string): StoredCollection[] {
+  const { isTracked } = getStore(storeId);
+  return readStoreData(storeId).collections.filter(c => c.isNew && !isTracked(c.handle));
 }
 
-export function getPollHistory(limit = 20): PollEntry[] {
-  return readStore().polls.slice(-limit).reverse();
-}
-
-export function getWishlist(): WishlistItem[] {
-  return readStore().wishlist.sort((a, b) => b.addedAt.localeCompare(a.addedAt));
-}
-
-export function toggleWishlist(item: Omit<WishlistItem, 'addedAt'>): boolean {
-  const store = readStore();
-  const idx = store.wishlist.findIndex(w => w.productHandle === item.productHandle);
-  if (idx >= 0) {
-    store.wishlist.splice(idx, 1);
-    writeStore(store);
-    return false;
-  }
-  store.wishlist.push({ ...item, addedAt: new Date().toISOString() });
-  writeStore(store);
-  return true;
+export function getPollHistory(storeId: string, limit = 20): PollEntry[] {
+  return readStoreData(storeId).polls.slice(-limit).reverse();
 }
 
 export function upsertCollections(
+  storeId: string,
   incoming: Omit<StoredCollection, 'firstSeenAt' | 'isNew' | 'availableCount' | 'outOfStockCount' | 'countsUpdatedAt'>[]
 ): number {
-  const store = readStore();
-  const isFirstRun = store.collections.length === 0;
-  const byId = new Map(store.collections.map(c => [c.shopifyId, c]));
+  const data = readStoreData(storeId);
+  const isFirstRun = data.collections.length === 0;
+  const byId = new Map(data.collections.map(c => [c.shopifyId, c]));
   let newCount = 0;
   const now = new Date().toISOString();
 
@@ -119,16 +95,17 @@ export function upsertCollections(
     }
   }
 
-  store.collections = Array.from(byId.values());
-  writeStore(store);
+  data.collections = Array.from(byId.values());
+  writeStoreData(storeId, data);
   return newCount;
 }
 
 export function batchUpdateProductCounts(
+  storeId: string,
   updates: { shopifyId: number; available: number; outOfStock: number }[]
 ): number {
-  const store = readStore();
-  const byId = new Map(store.collections.map(c => [c.shopifyId, c]));
+  const data = readStoreData(storeId);
+  const byId = new Map(data.collections.map(c => [c.shopifyId, c]));
   const now = new Date().toISOString();
   let changedCount = 0;
   for (const { shopifyId, available, outOfStock } of updates) {
@@ -143,27 +120,27 @@ export function batchUpdateProductCounts(
       }
     }
   }
-  writeStore(store);
+  writeStoreData(storeId, data);
   return changedCount;
 }
 
-export function addPoll(entry: PollEntry): void {
-  const store = readStore();
-  store.polls.push(entry);
-  if (store.polls.length > 100) store.polls = store.polls.slice(-100);
-  writeStore(store);
+export function addPoll(storeId: string, entry: PollEntry): void {
+  const data = readStoreData(storeId);
+  data.polls.push(entry);
+  if (data.polls.length > 100) data.polls = data.polls.slice(-100);
+  writeStoreData(storeId, data);
 }
 
-export function patchLastPoll(patch: Partial<PollEntry>): void {
-  const store = readStore();
-  if (store.polls.length > 0) {
-    Object.assign(store.polls[store.polls.length - 1], patch);
-    writeStore(store);
+export function patchLastPoll(storeId: string, patch: Partial<PollEntry>): void {
+  const data = readStoreData(storeId);
+  if (data.polls.length > 0) {
+    Object.assign(data.polls[data.polls.length - 1], patch);
+    writeStoreData(storeId, data);
   }
 }
 
-export function markAllSeen(): void {
-  const store = readStore();
-  store.collections.forEach(c => { c.isNew = false; });
-  writeStore(store);
+export function markAllSeen(storeId: string): void {
+  const data = readStoreData(storeId);
+  data.collections.forEach(c => { c.isNew = false; });
+  writeStoreData(storeId, data);
 }

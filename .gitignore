@@ -1,7 +1,8 @@
 node_modules/
 .next/
-data/*
-!data/.gitkeep
+data/**
+!data/**/
+!data/**/.gitkeep
 .env.local
 .claude/settings.local.json
 next-env.d.ts
