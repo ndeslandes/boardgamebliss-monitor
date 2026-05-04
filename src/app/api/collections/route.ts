@@ -8,9 +8,14 @@ export async function GET() {
   const wishlist = getWishlist();
 
   const availMap = new Map<string, boolean>();
+  const bggMap = new Map<string, { bggUrl: string | null; bggRank: number | null }>();
   for (const store of STORES) {
     const { products } = searchProducts(store.id, '', 'all', 10000);
-    for (const p of products) availMap.set(`${store.id}:${p.handle}`, p.available);
+    for (const p of products) {
+      const key = `${store.id}:${p.handle}`;
+      availMap.set(key, p.available);
+      bggMap.set(key, { bggUrl: p.bggUrl, bggRank: p.bggRank });
+    }
   }
 
   const tracked = STORES.flatMap(s =>
@@ -31,9 +36,13 @@ export async function GET() {
     tracked,
     otherNew,
     history,
-    wishlist: wishlist.map(w => ({
-      ...w,
-      available: availMap.get(`${w.storeId}:${w.productHandle}`) ?? null,
-    })),
+    wishlist: wishlist.map(w => {
+      const key = `${w.storeId}:${w.productHandle}`;
+      return {
+        ...w,
+        available: availMap.get(key) ?? null,
+        ...(bggMap.get(key) ?? { bggUrl: null, bggRank: null }),
+      };
+    }),
   });
 }

@@ -37,6 +37,8 @@ interface WishlistItem {
   collectionHandle: string;
   addedAt: string;
   available: boolean | null;
+  bggUrl: string | null;
+  bggRank: number | null;
 }
 
 interface Data {
@@ -317,14 +319,27 @@ export default function Dashboard() {
                   {data.wishlist.map(item => (
                     <tr key={`${item.storeId}:${item.productHandle}`} className={`hover:bg-gray-800/30 ${item.available === true ? 'bg-emerald-950/10' : ''}`}>
                       <td className="px-4 py-3">
-                        <a
-                          href={`${STORE_DOMAINS[item.storeId]}/products/${item.productHandle}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-blue-400 hover:text-blue-300 hover:underline font-medium"
-                        >
-                          {item.productTitle}
-                        </a>
+                        <div className="flex items-center gap-1.5">
+                          <a
+                            href={`${STORE_DOMAINS[item.storeId]}/products/${item.productHandle}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-blue-400 hover:text-blue-300 hover:underline font-medium"
+                          >
+                            {item.productTitle}
+                          </a>
+                          {item.bggUrl && (
+                            <a href={item.bggUrl} target="_blank" rel="noreferrer"
+                              className="text-orange-500 hover:text-orange-400 text-xs font-medium shrink-0" title="BoardGameGeek">
+                              BGG
+                            </a>
+                          )}
+                          {item.bggRank != null && (
+                            <span className="text-xs font-mono text-amber-400 shrink-0" title="BGG overall rank">
+                              #{item.bggRank}
+                            </span>
+                          )}
+                        </div>
                         {item.vendor && <p className="text-gray-600 text-xs mt-0.5">{item.vendor}</p>}
                       </td>
                       <td className="px-4 py-3">
