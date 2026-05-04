@@ -37,9 +37,10 @@ async function pollStore(storeId) {
     const counts = await fetchWithRetry(`${BASE}/${storeId}/poll-counts`);
     console.log(`[worker ${ts}] [${storeId}] Product counts updated for ${counts.updated} collections.`);
 
-    console.log(`[worker ${ts}] [${storeId}] Syncing BGG ranks...`);
     const bgg = await fetchWithRetry(`${BASE}/${storeId}/sync-bgg-ranks`);
-    console.log(`[worker ${ts}] [${storeId}] BGG ranks updated: ${bgg.updated}.`);
+    if (bgg.updated > 0 || bgg.remaining > 0) {
+      console.log(`[worker ${ts}] [${storeId}] BGG ranks: +${bgg.updated} fetched, ${bgg.remaining} remaining.`);
+    }
   } catch (err) {
     console.error(`[worker ${ts}] [${storeId}] Poll failed: ${err.message}`);
   }
