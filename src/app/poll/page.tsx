@@ -43,7 +43,7 @@ export default function PollPage() {
   const startRef = useRef<number | null>(null);
   const pollingRef = useRef(false);
   const [bggSyncing, setBggSyncing] = useState(false);
-  const [bggResult, setBggResult] = useState<{ updated: number; remaining: number } | null>(null);
+  const [bggResult, setBggResult] = useState<{ updated: number; remaining: number; error?: boolean } | null>(null);
 
   const loadHistory = useCallback(async (storeId: string) => {
     const res = await fetch(`/api/${storeId}/collections`);
@@ -101,11 +101,61 @@ export default function PollPage() {
     setBggSyncing(true);
     setBggResult(null);
     try {
-      const res = await fetch(`/api/${activeStore}/sync-bgg-ranks`, { method: 'POST' });
-      const data = await res.json();
-      setBggResult({ updated: data.updated ?? 0, remaining: data.remaining ?? 0 });
+      // Step 1: get the list of products that need a rank from the server
+      const listRes = await fetch(`/api/${activeStore}/sync-bgg-ranks`);
+      const { needsRank, remaining } = await listRes.json() as {
+        needsRank: { handle: string; bggUrl: string }[];
+        remaining: number;
+      };
+
+      if (needsRank.length === 0) {
+        setBggResult({ updated: 0, remaining: 0 });
+        return;
+      }
+
+      // Step 2: fetch ranks from BGG in the browser (bypasses Cloudflare IP block)
+      const BATCH = 20;
+      const saved: { handle: string; bggRank: number }[] = [];
+
+      for (let i = 0; i < needsRank.length; i += BATCH) {
+        const batch = needsRank.slice(i, i + BATCH);
+        const idToHandle = new Map<number, string>();
+        for (const p of batch) {
+          const m = p.bggUrl.match(/\/boardgame\/(\d+)/);
+          if (m) idToHandle.set(parseInt(m[1], 10), p.handle);
+        }
+        try {
+          const ids = Array.from(idToHandle.keys()).join(',');
+          const res = await fetch(`https://boardgamegeek.com/xmlapi2/thing?id=${ids}&stats=1`);
+          if (!res.ok) { setBggResult({ updated: saved.length, remaining, error: true }); break; }
+          const xml = await res.text();
+          const doc = new DOMParser().parseFromString(xml, 'text/xml');
+          doc.querySelectorAll('item').forEach(el => {
+            const id = parseInt(el.getAttribute('id') ?? '0', 10);
+            const handle = idToHandle.get(id);
+            if (!handle) return;
+            const rankEl = Array.from(el.querySelectorAll('rank')).find(r => r.getAttribute('name') === 'boardgame');
+            const val = rankEl?.getAttribute('value');
+            if (val && val !== 'Not Ranked') {
+              const rank = parseInt(val, 10);
+              if (!isNaN(rank)) saved.push({ handle, bggRank: rank });
+            }
+          });
+        } catch { break; }
+        if (i + BATCH < needsRank.length) await new Promise(r => setTimeout(r, 700));
+      }
+
+      // Step 3: save fetched ranks back to the server
+      if (saved.length > 0) {
+        await fetch(`/api/${activeStore}/store-bgg-ranks`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ranks: saved }),
+        });
+      }
+      setBggResult({ updated: saved.length, remaining: Math.max(0, remaining - saved.length) });
     } catch {
-      setBggResult({ updated: 0, remaining: -1 });
+      setBggResult({ updated: 0, remaining: 0, error: true });
     } finally {
       setBggSyncing(false);
     }
@@ -162,8 +212,8 @@ export default function PollPage() {
             </button>
             {bggResult && !bggSyncing && (
               <span className="text-xs text-gray-500">
-                {bggResult.remaining === -1
-                  ? 'error'
+                {bggResult.error
+                  ? <span className="text-red-400">BGG unreachable</span>
                   : bggResult.updated === 0 && bggResult.remaining === 0
                   ? 'all ranks up to date'
                   : `+${bggResult.updated} fetched${bggResult.remaining > 0 ? `, ${bggResult.remaining} remaining` : ''}`}
