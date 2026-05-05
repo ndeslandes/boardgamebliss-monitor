@@ -1,51 +1,31 @@
 import { NextResponse } from 'next/server';
-import { getConfig } from '@/lib/config';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 const BASE = { 'User-Agent': UA, 'Accept': '*/*', 'Accept-Language': 'en-CA,en;q=0.9' };
 
-function parseSetCookies(headers: string[]): Record<string, string> {
-  const map: Record<string, string> = {};
-  for (const h of headers) {
-    const parts = h.split(';');
-    const [rawName, ...rest] = parts[0].split('=');
-    const name = rawName.trim();
-    const value = rest.join('=').trim();
-    const maxAge = parts.find(p => p.trim().toLowerCase().startsWith('max-age='));
-    const isDelete = value === 'deleted' || (maxAge != null && parseInt(maxAge.split('=')[1]) <= 0);
-    if (isDelete) { delete map[name]; } else { map[name] = value; }
-  }
-  return map;
+async function probe(url: string, extra: Record<string, string> = {}) {
+  try {
+    const res = await fetch(url, { headers: { ...BASE, ...extra }, redirect: 'follow' });
+    const body = await res.text();
+    return { status: res.status, length: body.length, snippet: body.slice(0, 500) };
+  } catch (e) { return { status: 0, error: String(e) }; }
 }
 
 export async function GET() {
-  const cfg = getConfig();
-  if (!cfg.bggUsername || !cfg.bggPassword) {
-    return NextResponse.json({ error: 'No credentials — set them on /poll first.' });
+  const [htmlPage, geekPreview, linkedItems] = await Promise.all([
+    // The actual BGG game page — Angular SPA but might have SSR rank data or meta tags
+    probe('https://boardgamegeek.com/boardgame/224517/brass-birmingham'),
+    // Geekdo internal endpoints
+    probe('https://api.geekdo.com/api/geekpreview?objecttype=thing&objectid=224517'),
+    probe('https://api.geekdo.com/api/linkeditems?objecttype=thing&objectid=224517&linktype=boardgamerank&pageid=1'),
+  ]);
+
+  // Extract rank from HTML page if present
+  let rankInHtml: string | null = null;
+  if (typeof htmlPage.snippet === 'string') {
+    const m = (htmlPage.snippet + '').match(/"rank"\s*:\s*(\d+)/);
+    rankInHtml = m ? m[1] : null;
   }
 
-  const loginRes = await fetch('https://boardgamegeek.com/login/api/v1', {
-    method: 'POST',
-    headers: { ...BASE, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ credentials: { username: cfg.bggUsername, password: cfg.bggPassword } }),
-  });
-
-  const raw: string[] = loginRes.headers.getSetCookie?.() ?? [];
-  const cookies = parseSetCookies(raw);
-  const cookieStr = Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; ');
-
-  const xmlRes = await fetch('https://boardgamegeek.com/xmlapi2/thing?id=224517&stats=1', {
-    headers: { ...BASE, Cookie: cookieStr },
-  });
-  const body = await xmlRes.text();
-
-  return NextResponse.json({
-    loginStatus: loginRes.status,
-    cookieNames: Object.keys(cookies),
-    cookieStr,
-    xmlStatus: xmlRes.status,
-    hasItem: body.includes('<item '),
-    hasRank: body.includes('<rank '),
-    snippet: body.slice(0, 400),
-  });
+  return NextResponse.json({ htmlPage: { ...htmlPage, rankInHtml }, geekPreview, linkedItems });
 }
