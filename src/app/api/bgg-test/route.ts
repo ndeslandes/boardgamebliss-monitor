@@ -3,23 +3,30 @@ import { NextResponse } from 'next/server';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 const BASE = { 'User-Agent': UA, 'Accept': 'application/json', 'Accept-Language': 'en-CA,en;q=0.9' };
 
-async function probe(url: string) {
-  try {
-    const res = await fetch(url, { headers: BASE, redirect: 'follow' });
-    const body = await res.text();
-    return { status: res.status, length: body.length, snippet: body.slice(0, 500) };
-  } catch (e) { return { status: 0, error: String(e) }; }
+function findPaths(obj: unknown, keyword: string, path = ''): string[] {
+  const results: string[] = [];
+  if (typeof obj === 'object' && obj !== null) {
+    for (const [k, v] of Object.entries(obj)) {
+      const p = path ? `${path}.${k}` : k;
+      if (k.toLowerCase().includes(keyword)) results.push(`${p} = ${JSON.stringify(v).slice(0, 100)}`);
+      results.push(...findPaths(v, keyword, p));
+    }
+  }
+  return results;
 }
 
 export async function GET() {
-  const [rankings, hotness, geekitemsStats] = await Promise.all([
-    // Rankings browse API (powers boardgamegeek.com/browse/boardgame)
-    probe('https://api.geekdo.com/api/rankings?objecttype=thing&rankobjecttype=subtype&rankobjectid=5497&pageid=1'),
-    // Hotness list
-    probe('https://api.geekdo.com/api/hotness?objecttype=boardgame'),
-    // geekitems with stats param
-    probe('https://api.geekdo.com/api/geekitems?objecttype=thing&objectid=224517&subtype=boardgame&stats=1'),
-  ]);
+  const res = await fetch(
+    'https://api.geekdo.com/api/geekitems?objecttype=thing&objectid=224517&subtype=boardgame&stats=1',
+    { headers: BASE }
+  );
+  const json = await res.json();
 
-  return NextResponse.json({ rankings, hotness, geekitemsStats });
+  return NextResponse.json({
+    status: res.status,
+    topKeys: Object.keys(json?.item ?? {}),
+    rankPaths: findPaths(json, 'rank'),
+    statPaths: findPaths(json, 'stat'),
+    ratingPaths: findPaths(json, 'rating'),
+  });
 }
