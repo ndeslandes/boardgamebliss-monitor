@@ -44,8 +44,10 @@ export default function PollPage() {
   const pollingRef = useRef(false);
   const [bggSyncing, setBggSyncing] = useState(false);
   const [bggResult, setBggResult] = useState<{ updated: number; remaining: number; error?: boolean; detail?: string } | null>(null);
-  const [bggCookie, setBggCookie] = useState('');
-  const [cookieSaved, setCookieSaved] = useState(false);
+  const [bggUsername, setBggUsername] = useState('');
+  const [bggPassword, setBggPassword] = useState('');
+  const [bggHasPassword, setBggHasPassword] = useState(false);
+  const [credsSaved, setCredsSaved] = useState(false);
 
   const loadHistory = useCallback(async (storeId: string) => {
     const res = await fetch(`/api/${storeId}/collections`);
@@ -78,17 +80,24 @@ export default function PollPage() {
   }, [loadHistory]);
 
   useEffect(() => {
-    fetch('/api/config').then(r => r.json()).then(d => { if (d.bggCookie) setBggCookie(d.bggCookie); });
+    fetch('/api/config').then(r => r.json()).then(d => {
+      if (d.bggUsername) setBggUsername(d.bggUsername);
+      setBggHasPassword(!!d.hasPassword);
+    });
   }, []);
 
-  async function saveCookie() {
+  async function saveCredentials() {
+    const body: Record<string, string> = { bggUsername };
+    if (bggPassword) body.bggPassword = bggPassword;
     await fetch('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ bggCookie }),
+      body: JSON.stringify(body),
     });
-    setCookieSaved(true);
-    setTimeout(() => setCookieSaved(false), 2000);
+    setBggHasPassword(true);
+    setBggPassword('');
+    setCredsSaved(true);
+    setTimeout(() => setCredsSaved(false), 2000);
   }
 
   useEffect(() => {
@@ -193,27 +202,30 @@ export default function PollPage() {
           </div>
         </div>
 
-        {/* BGG cookie auth */}
+        {/* BGG credentials */}
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
-          <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">BGG Cookie Auth</p>
-          <p className="text-xs text-gray-600">
-            Open <span className="text-gray-500">boardgamegeek.com</span> in your browser, then paste all cookies from DevTools
-            → Application → Cookies → boardgamegeek.com (copy the full cookie header string).
-          </p>
+          <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">BGG Account</p>
           <div className="flex gap-2">
-            <textarea
-              value={bggCookie}
-              onChange={e => { setBggCookie(e.target.value); setCookieSaved(false); }}
-              placeholder="cf_clearance=...; bggusername=...; ..."
-              rows={2}
-              className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-300 placeholder-gray-600 font-mono resize-none focus:outline-none focus:border-gray-600"
+            <input
+              type="text"
+              value={bggUsername}
+              onChange={e => { setBggUsername(e.target.value); setCredsSaved(false); }}
+              placeholder="Username"
+              className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-600"
+            />
+            <input
+              type="password"
+              value={bggPassword}
+              onChange={e => { setBggPassword(e.target.value); setCredsSaved(false); }}
+              placeholder={bggHasPassword ? '••••••••' : 'Password'}
+              className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-600"
             />
             <button
-              onClick={saveCookie}
-              disabled={!bggCookie.trim()}
-              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 rounded-lg text-xs font-medium transition-colors self-start"
+              onClick={saveCredentials}
+              disabled={!bggUsername.trim() || (!bggPassword && !bggHasPassword)}
+              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 rounded-lg text-xs font-medium transition-colors"
             >
-              {cookieSaved ? 'Saved ✓' : 'Save'}
+              {credsSaved ? 'Saved ✓' : 'Save'}
             </button>
           </div>
         </div>

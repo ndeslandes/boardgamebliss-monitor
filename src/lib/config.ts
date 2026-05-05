@@ -3,8 +3,12 @@ import path from 'path';
 
 const CONFIG_FILE = path.join(process.cwd(), 'data', 'config.json');
 
-interface AppConfig {
-  bggCookie?: string;
+export interface AppConfig {
+  bggUsername?: string;
+  bggPassword?: string;
+  // cached from last successful login
+  bggSessionId?: string;
+  bggSessionExpiry?: string; // ISO timestamp
 }
 
 function read(): AppConfig {

@@ -1,4 +1,4 @@
-import { getConfig } from './config';
+import { getBggSessionCookie } from './bgg-auth';
 
 const BGG_API = 'https://boardgamegeek.com/xmlapi2/thing';
 const BATCH_SIZE = 20;
@@ -10,14 +10,14 @@ export function parseBggId(bggUrl: string): number | null {
   return m ? parseInt(m[1], 10) : null;
 }
 
-function buildHeaders(): Record<string, string> {
-  const { bggCookie } = getConfig();
+async function buildHeaders(): Promise<Record<string, string>> {
   const h: Record<string, string> = {
     'User-Agent': UA,
     'Accept': 'application/xml,text/xml,*/*',
     'Accept-Language': 'en-CA,en;q=0.9',
   };
-  if (bggCookie) h['Cookie'] = bggCookie;
+  const session = await getBggSessionCookie();
+  if (session) h['Cookie'] = session;
   return h;
 }
 
@@ -32,8 +32,9 @@ function extractRankFromSection(section: string): number | null {
 }
 
 async function fetchWithRetry(url: string, retries = 2): Promise<Response> {
+  const headers = await buildHeaders();
   for (let i = 0; i <= retries; i++) {
-    const res = await fetch(url, { headers: buildHeaders() });
+    const res = await fetch(url, { headers });
     if (res.status === 202) {
       await new Promise(r => setTimeout(r, 3000));
       continue;
