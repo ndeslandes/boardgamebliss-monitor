@@ -2,42 +2,50 @@ import { NextResponse } from 'next/server';
 import { getConfig } from '@/lib/config';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
-const BASE_HEADERS = { 'User-Agent': UA, 'Accept': '*/*', 'Accept-Language': 'en-CA,en;q=0.9' };
+const BASE = { 'User-Agent': UA, 'Accept': '*/*', 'Accept-Language': 'en-CA,en;q=0.9' };
 
-async function probe(url: string, extra: Record<string, string> = {}) {
-  try {
-    const res = await fetch(url, { headers: { ...BASE_HEADERS, ...extra }, redirect: 'follow' });
-    const body = await res.text();
-    return { status: res.status, length: body.length, snippet: body.slice(0, 300) };
-  } catch (e) { return { status: 0, error: String(e) }; }
+function parseSetCookies(headers: string[]): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const h of headers) {
+    const parts = h.split(';');
+    const [rawName, ...rest] = parts[0].split('=');
+    const name = rawName.trim();
+    const value = rest.join('=').trim();
+    const maxAge = parts.find(p => p.trim().toLowerCase().startsWith('max-age='));
+    const isDelete = value === 'deleted' || (maxAge != null && parseInt(maxAge.split('=')[1]) <= 0);
+    if (isDelete) { delete map[name]; } else { map[name] = value; }
+  }
+  return map;
 }
 
 export async function GET() {
   const cfg = getConfig();
-
-  // Step 1: web-form login — captures bggusername + bggpassword cookies (not just SessionID)
-  let webCookies = '';
-  if (cfg.bggUsername && cfg.bggPassword) {
-    const loginRes = await fetch('https://boardgamegeek.com/login/api/v1', {
-      method: 'POST',
-      headers: { ...BASE_HEADERS, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ credentials: { username: cfg.bggUsername, password: cfg.bggPassword } }),
-    });
-    // collect all Set-Cookie header values
-    const raw = loginRes.headers.getSetCookie?.() ?? [];
-    webCookies = raw.map((c: string) => c.split(';')[0]).join('; ');
+  if (!cfg.bggUsername || !cfg.bggPassword) {
+    return NextResponse.json({ error: 'No credentials — set them on /poll first.' });
   }
 
-  const [xmlWithCookies, dump] = await Promise.all([
-    // XML API v2 with all cookies from login
-    probe('https://boardgamegeek.com/xmlapi2/thing?id=224517&stats=1', webCookies ? { Cookie: webCookies } : {}),
-    // BGG public data dump (all game ranks as gzip CSV)
-    probe('https://boardgamegeek.com/data_dumps/bg_ranks'),
-  ]);
+  const loginRes = await fetch('https://boardgamegeek.com/login/api/v1', {
+    method: 'POST',
+    headers: { ...BASE, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ credentials: { username: cfg.bggUsername, password: cfg.bggPassword } }),
+  });
+
+  const raw: string[] = loginRes.headers.getSetCookie?.() ?? [];
+  const cookies = parseSetCookies(raw);
+  const cookieStr = Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; ');
+
+  const xmlRes = await fetch('https://boardgamegeek.com/xmlapi2/thing?id=224517&stats=1', {
+    headers: { ...BASE, Cookie: cookieStr },
+  });
+  const body = await xmlRes.text();
 
   return NextResponse.json({
-    webCookies: webCookies || '(no credentials stored)',
-    xmlWithAllCookies: xmlWithCookies,
-    dataDump: dump,
+    loginStatus: loginRes.status,
+    cookieNames: Object.keys(cookies),
+    cookieStr,
+    xmlStatus: xmlRes.status,
+    hasItem: body.includes('<item '),
+    hasRank: body.includes('<rank '),
+    snippet: body.slice(0, 400),
   });
 }
