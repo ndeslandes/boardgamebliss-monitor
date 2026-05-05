@@ -42,12 +42,6 @@ export default function PollPage() {
   const [elapsed, setElapsed] = useState(0);
   const startRef = useRef<number | null>(null);
   const pollingRef = useRef(false);
-  const [bggSyncing, setBggSyncing] = useState(false);
-  const [bggResult, setBggResult] = useState<{ updated: number; remaining: number; error?: boolean; detail?: string } | null>(null);
-  const [bggUsername, setBggUsername] = useState('');
-  const [bggPassword, setBggPassword] = useState('');
-  const [bggHasPassword, setBggHasPassword] = useState(false);
-  const [credsSaved, setCredsSaved] = useState(false);
 
   const loadHistory = useCallback(async (storeId: string) => {
     const res = await fetch(`/api/${storeId}/collections`);
@@ -80,27 +74,6 @@ export default function PollPage() {
   }, [loadHistory]);
 
   useEffect(() => {
-    fetch('/api/config').then(r => r.json()).then(d => {
-      if (d.bggUsername) setBggUsername(d.bggUsername);
-      setBggHasPassword(!!d.hasPassword);
-    });
-  }, []);
-
-  async function saveCredentials() {
-    const body: Record<string, string> = { bggUsername };
-    if (bggPassword) body.bggPassword = bggPassword;
-    await fetch('/api/config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    setBggHasPassword(true);
-    setBggPassword('');
-    setCredsSaved(true);
-    setTimeout(() => setCredsSaved(false), 2000);
-  }
-
-  useEffect(() => {
     STORES.forEach(s => loadHistory(s.id));
     fetch('/api/poll-progress')
       .then(r => r.json())
@@ -120,25 +93,6 @@ export default function PollPage() {
     }, 500);
     return () => clearInterval(id);
   }, [progress, activeStore]);
-
-  async function syncBggRanks() {
-    if (bggSyncing) return;
-    setBggSyncing(true);
-    setBggResult(null);
-    try {
-      const res = await fetch(`/api/${activeStore}/sync-bgg-ranks`, { method: 'POST' });
-      const data = await res.json() as { updated?: number; remaining?: number; error?: string };
-      if (data.error) {
-        setBggResult({ updated: 0, remaining: 0, error: true, detail: data.error });
-      } else {
-        setBggResult({ updated: data.updated ?? 0, remaining: data.remaining ?? 0 });
-      }
-    } catch (e) {
-      setBggResult({ updated: 0, remaining: 0, error: true, detail: String(e) });
-    } finally {
-      setBggSyncing(false);
-    }
-  }
 
   async function runPoll() {
     if (pollingRef.current) return;
@@ -176,58 +130,9 @@ export default function PollPage() {
     <main className="min-h-screen bg-gray-950 text-gray-100">
       <div className="max-w-3xl mx-auto px-6 py-8 space-y-8">
 
-        {/* Header: title + BGG sync (global, not per-store) */}
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <Link href="/" className="text-gray-600 hover:text-gray-300 text-sm">← Dashboard</Link>
-            <h1 className="text-xl font-semibold text-white">Sync</h1>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={syncBggRanks}
-              disabled={bggSyncing || running}
-              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors text-orange-400 hover:text-orange-300"
-            >
-              {bggSyncing ? 'Fetching…' : 'Sync BGG Ranks'}
-            </button>
-            {bggResult && !bggSyncing && (
-              <span className="text-xs max-w-xs truncate" title={bggResult.detail}>
-                {bggResult.error
-                  ? <span className="text-red-400">{bggResult.detail ?? 'BGG unreachable'}</span>
-                  : bggResult.updated === 0 && bggResult.remaining === 0
-                  ? <span className="text-gray-600">all up to date</span>
-                  : <span className="text-gray-500">+{bggResult.updated} fetched{bggResult.remaining > 0 ? `, ${bggResult.remaining} left` : ''}</span>}
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* BGG credentials */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
-          <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">BGG Account</p>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={bggUsername}
-              onChange={e => { setBggUsername(e.target.value); setCredsSaved(false); }}
-              placeholder="Username"
-              className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-600"
-            />
-            <input
-              type="password"
-              value={bggPassword}
-              onChange={e => { setBggPassword(e.target.value); setCredsSaved(false); }}
-              placeholder={bggHasPassword ? '••••••••' : 'Password'}
-              className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-600"
-            />
-            <button
-              onClick={saveCredentials}
-              disabled={!bggUsername.trim() || (!bggPassword && !bggHasPassword)}
-              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 rounded-lg text-xs font-medium transition-colors"
-            >
-              {credsSaved ? 'Saved ✓' : 'Save'}
-            </button>
-          </div>
+        <div className="flex items-center gap-4">
+          <Link href="/" className="text-gray-600 hover:text-gray-300 text-sm">← Dashboard</Link>
+          <h1 className="text-xl font-semibold text-white">Sync</h1>
         </div>
 
         {/* Store tabs + per-store Check Now */}
@@ -236,7 +141,7 @@ export default function PollPage() {
             {STORES.map(s => (
               <button
                 key={s.id}
-                onClick={() => { setActiveStore(s.id); setShowAll(false); setBggResult(null); }}
+                onClick={() => { setActiveStore(s.id); setShowAll(false); }}
                 className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                   activeStore === s.id
                     ? 'border-blue-500 text-white'

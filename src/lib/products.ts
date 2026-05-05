@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import type { ShopifyProduct } from './shopify';
-import { parseBggId, fetchBggRanks } from './bgg';
 
 const DATA_BASE = path.join(process.cwd(), 'data');
 
@@ -30,7 +29,6 @@ export interface CachedProduct {
   skus: string[];
   imageUrl: string | null;
   bggUrl: string | null;
-  bggRank: number | null;
   collectionHandles: string[];
   variants: CachedVariant[];
   updatedAt: string;
@@ -101,7 +99,6 @@ function toEntry(p: ShopifyProduct, collectionHandle: string, existing: CachedPr
     skus: variants.map(v => v.sku).filter(Boolean),
     imageUrl: p.images?.[0]?.src ?? null,
     bggUrl: parseBggUrl(p.body_html),
-    bggRank: existing?.bggRank ?? null,
     collectionHandles,
     variants,
     updatedAt: p.updated_at ?? now,
@@ -175,45 +172,4 @@ export function getLastSyncedAt(storeId: string): string | null {
 
 export function getProductCount(storeId: string): number {
   return Object.keys(read(storeId).byHandle).length;
-}
-
-export function storeBggRanks(storeId: string, ranks: { handle: string; bggRank: number }[]): number {
-  const store = read(storeId);
-  let updated = 0;
-  for (const { handle, bggRank } of ranks) {
-    if (store.byHandle[handle] && typeof bggRank === 'number') {
-      store.byHandle[handle].bggRank = bggRank;
-      updated++;
-    }
-  }
-  if (updated > 0) write(storeId, store);
-  return updated;
-}
-
-export async function updateBggRanks(storeId: string, maxProducts = 300): Promise<number> {
-  const store = read(storeId);
-  const toFetch: { handle: string; bggId: number }[] = [];
-
-  for (const [handle, product] of Object.entries(store.byHandle)) {
-    if (toFetch.length >= maxProducts) break;
-    if (product.bggUrl && product.bggRank == null) {
-      const bggId = parseBggId(product.bggUrl);
-      if (bggId) toFetch.push({ handle, bggId });
-    }
-  }
-
-  if (toFetch.length === 0) return 0;
-
-  const ranks = await fetchBggRanks(toFetch.map(t => t.bggId));
-  let updated = 0;
-  for (const { handle, bggId } of toFetch) {
-    const rank = ranks.get(bggId);
-    if (rank != null && store.byHandle[handle]) {
-      store.byHandle[handle].bggRank = rank;
-      updated++;
-    }
-  }
-
-  if (updated > 0) write(storeId, store);
-  return updated;
 }

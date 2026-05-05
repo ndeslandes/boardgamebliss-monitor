@@ -38,7 +38,6 @@ interface WishlistItem {
   addedAt: string;
   available: boolean | null;
   bggUrl: string | null;
-  bggRank: number | null;
 }
 
 interface Data {
@@ -161,72 +160,16 @@ function CollectionTable({ collections }: { collections: Collection[] }) {
   );
 }
 
-async function fetchWishlistBggRanks(
-  items: WishlistItem[],
-  onRank: (updater: (prev: Map<string, number>) => Map<string, number>) => void,
-) {
-  const byStore = new Map<string, WishlistItem[]>();
-  for (const item of items) {
-    const list = byStore.get(item.storeId) ?? [];
-    list.push(item);
-    byStore.set(item.storeId, list);
-  }
-
-  const fetchForStore = async (storeId: string, storeItems: WishlistItem[]) => {
-    const idToHandle = new Map<number, string>();
-    for (const item of storeItems) {
-      const m = item.bggUrl!.match(/\/boardgame\/(\d+)/);
-      if (m) idToHandle.set(parseInt(m[1], 10), item.productHandle);
-    }
-    try {
-      const ids = Array.from(idToHandle.keys()).join(',');
-      const res = await fetch(`https://boardgamegeek.com/xmlapi2/thing?id=${ids}&stats=1`);
-      if (!res.ok) return;
-      const xml = await res.text();
-      const doc = new DOMParser().parseFromString(xml, 'text/xml');
-      const saved: { handle: string; bggRank: number }[] = [];
-      doc.querySelectorAll('item').forEach(el => {
-        const id = parseInt(el.getAttribute('id') ?? '0', 10);
-        const handle = idToHandle.get(id);
-        if (!handle) return;
-        const rankEl = Array.from(el.querySelectorAll('rank')).find(r => r.getAttribute('name') === 'boardgame');
-        const val = rankEl?.getAttribute('value');
-        if (val && val !== 'Not Ranked') {
-          const rank = parseInt(val, 10);
-          if (!isNaN(rank)) {
-            onRank(prev => new Map(prev).set(`${storeId}:${handle}`, rank));
-            saved.push({ handle, bggRank: rank });
-          }
-        }
-      });
-      if (saved.length > 0) {
-        fetch(`/api/${storeId}/store-bgg-ranks`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ranks: saved }),
-        }).catch(() => {});
-      }
-    } catch { /* BGG unreachable, skip silently */ }
-  };
-
-  byStore.forEach((storeItems, storeId) => { fetchForStore(storeId, storeItems); });
-}
 
 export default function Dashboard() {
   const [data, setData] = useState<Data | null>(null);
   const [marking, setMarking] = useState(false);
   const removingRef = useRef<Set<string>>(new Set());
-  const [wishlistLiveRanks, setWishlistLiveRanks] = useState<Map<string, number>>(new Map());
-
   const load = useCallback(async () => {
     try {
       const res = await fetch('/api/collections');
       const d: Data = await res.json();
       setData(d);
-      const needsRank = d.wishlist.filter(w => w.bggUrl && w.bggRank == null);
-      if (needsRank.length > 0) {
-        fetchWishlistBggRanks(needsRank, setWishlistLiveRanks);
-      }
     } catch (err) {
       console.error('Failed to load dashboard data:', err);
     }
@@ -390,11 +333,6 @@ export default function Dashboard() {
                               className="text-orange-500 hover:text-orange-400 text-xs font-medium shrink-0" title="BoardGameGeek">
                               BGG
                             </a>
-                          )}
-                          {(item.bggRank ?? wishlistLiveRanks.get(`${item.storeId}:${item.productHandle}`)) != null && (
-                            <span className="text-xs font-mono text-amber-400 shrink-0" title="BGG overall rank">
-                              #{item.bggRank ?? wishlistLiveRanks.get(`${item.storeId}:${item.productHandle}`)}
-                            </span>
                           )}
                         </div>
                         {item.vendor && <p className="text-gray-600 text-xs mt-0.5">{item.vendor}</p>}

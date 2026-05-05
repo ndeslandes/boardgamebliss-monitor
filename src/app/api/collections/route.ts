@@ -8,13 +8,13 @@ export async function GET() {
   const wishlist = getWishlist();
 
   const availMap = new Map<string, boolean>();
-  const bggMap = new Map<string, { bggUrl: string | null; bggRank: number | null }>();
+  const bggUrlMap = new Map<string, string | null>();
   for (const store of STORES) {
     const { products } = searchProducts(store.id, '', 'all', 10000);
     for (const p of products) {
       const key = `${store.id}:${p.handle}`;
       availMap.set(key, p.available);
-      bggMap.set(key, { bggUrl: p.bggUrl, bggRank: p.bggRank ?? null });
+      bggUrlMap.set(key, p.bggUrl);
     }
   }
 
@@ -38,11 +38,7 @@ export async function GET() {
     history,
     wishlist: wishlist.map(w => {
       const key = `${w.storeId}:${w.productHandle}`;
-      return {
-        ...w,
-        available: availMap.get(key) ?? null,
-        ...(bggMap.get(key) ?? { bggUrl: null, bggRank: null }),
-      };
+      return { ...w, available: availMap.get(key) ?? null, bggUrl: bggUrlMap.get(key) ?? null };
     }),
   });
 }
