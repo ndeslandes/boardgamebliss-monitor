@@ -13,17 +13,15 @@ export async function GET() {
   if (bggCookie) headers['Cookie'] = bggCookie;
 
   try {
-    // Brass: Birmingham — a known ranked game
-    const res = await fetch('https://boardgamegeek.com/xmlapi2/thing?id=224517&stats=1', { headers });
-    const body = await res.text();
+    const [r1, r2] = await Promise.all([
+      fetch('https://boardgamegeek.com/xmlapi2/thing?id=224517&stats=1', { headers }),
+      fetch('https://api.geekdo.com/xmlapi2/thing?id=224517&stats=1', { headers }),
+    ]);
+    const [b1, b2] = await Promise.all([r1.text(), r2.text()]);
     return NextResponse.json({
-      status: res.status,
-      ok: res.ok,
+      bgg:    { status: r1.status, hasItem: b1.includes('<item '), hasRank: b1.includes('<rank '), snippet: b1.slice(0, 300) },
+      geekdo: { status: r2.status, hasItem: b2.includes('<item '), hasRank: b2.includes('<rank '), snippet: b2.slice(0, 300) },
       hasCookie: !!bggCookie,
-      cookieLength: bggCookie?.length ?? 0,
-      bodySnippet: body.slice(0, 600),
-      hasItemTag: body.includes('<item '),
-      hasRankTag: body.includes('<rank '),
     });
   } catch (e) {
     return NextResponse.json({ error: String(e) });
