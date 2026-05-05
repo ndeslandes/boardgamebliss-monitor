@@ -44,6 +44,8 @@ export default function PollPage() {
   const pollingRef = useRef(false);
   const [bggSyncing, setBggSyncing] = useState(false);
   const [bggResult, setBggResult] = useState<{ updated: number; remaining: number; error?: boolean; detail?: string } | null>(null);
+  const [bggCookie, setBggCookie] = useState('');
+  const [cookieSaved, setCookieSaved] = useState(false);
 
   const loadHistory = useCallback(async (storeId: string) => {
     const res = await fetch(`/api/${storeId}/collections`);
@@ -74,6 +76,20 @@ export default function PollPage() {
     setElapsed(0);
     await loadHistory(storeId);
   }, [loadHistory]);
+
+  useEffect(() => {
+    fetch('/api/config').then(r => r.json()).then(d => { if (d.bggCookie) setBggCookie(d.bggCookie); });
+  }, []);
+
+  async function saveCookie() {
+    await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bggCookie }),
+    });
+    setCookieSaved(true);
+    setTimeout(() => setCookieSaved(false), 2000);
+  }
 
   useEffect(() => {
     STORES.forEach(s => loadHistory(s.id));
@@ -214,6 +230,7 @@ export default function PollPage() {
     <main className="min-h-screen bg-gray-950 text-gray-100">
       <div className="max-w-3xl mx-auto px-6 py-8 space-y-8">
 
+        {/* Header: title + BGG sync (global, not per-store) */}
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <Link href="/" className="text-gray-600 hover:text-gray-300 text-sm">← Dashboard</Link>
@@ -228,42 +245,69 @@ export default function PollPage() {
               {bggSyncing ? 'Fetching…' : 'Sync BGG Ranks'}
             </button>
             {bggResult && !bggSyncing && (
-              <span className="text-xs text-gray-500 max-w-sm truncate" title={bggResult.detail}>
+              <span className="text-xs max-w-xs truncate" title={bggResult.detail}>
                 {bggResult.error
                   ? <span className="text-red-400">{bggResult.detail ?? 'BGG unreachable'}</span>
                   : bggResult.updated === 0 && bggResult.remaining === 0
-                  ? 'all ranks up to date'
-                  : `+${bggResult.updated} fetched${bggResult.remaining > 0 ? `, ${bggResult.remaining} remaining` : ''}`}
+                  ? <span className="text-gray-600">all up to date</span>
+                  : <span className="text-gray-500">+{bggResult.updated} fetched{bggResult.remaining > 0 ? `, ${bggResult.remaining} left` : ''}</span>}
               </span>
             )}
+          </div>
+        </div>
+
+        {/* BGG cookie auth */}
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
+          <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">BGG Cookie Auth</p>
+          <p className="text-xs text-gray-600">
+            Open <span className="text-gray-500">boardgamegeek.com</span> in your browser, then paste all cookies from DevTools
+            → Application → Cookies → boardgamegeek.com (copy the full cookie header string).
+          </p>
+          <div className="flex gap-2">
+            <textarea
+              value={bggCookie}
+              onChange={e => { setBggCookie(e.target.value); setCookieSaved(false); }}
+              placeholder="cf_clearance=...; bggusername=...; ..."
+              rows={2}
+              className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-xs text-gray-300 placeholder-gray-600 font-mono resize-none focus:outline-none focus:border-gray-600"
+            />
             <button
-              onClick={runPoll}
-              disabled={running}
-              className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors min-w-[10rem] text-center"
+              onClick={saveCookie}
+              disabled={!bggCookie.trim()}
+              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 rounded-lg text-xs font-medium transition-colors self-start"
             >
-              {running ? 'Running…' : 'Check Now'}
+              {cookieSaved ? 'Saved ✓' : 'Save'}
             </button>
           </div>
         </div>
 
-        {/* Store tabs */}
-        <div className="flex gap-1 border-b border-gray-800 -mb-4">
-          {STORES.map(s => (
-            <button
-              key={s.id}
-              onClick={() => { setActiveStore(s.id); setShowAll(false); setBggResult(null); }}
-              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                activeStore === s.id
-                  ? 'border-blue-500 text-white'
-                  : 'border-transparent text-gray-500 hover:text-gray-300'
-              }`}
-            >
-              {s.name}
-              {progress[s.id]?.phase !== 'idle' && progress[s.id]?.phase !== undefined && (
-                <span className="ml-1.5 w-1.5 h-1.5 bg-blue-400 rounded-full inline-block animate-pulse" />
-              )}
-            </button>
-          ))}
+        {/* Store tabs + per-store Check Now */}
+        <div className="flex items-center justify-between gap-4 border-b border-gray-800">
+          <div className="flex gap-1">
+            {STORES.map(s => (
+              <button
+                key={s.id}
+                onClick={() => { setActiveStore(s.id); setShowAll(false); setBggResult(null); }}
+                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  activeStore === s.id
+                    ? 'border-blue-500 text-white'
+                    : 'border-transparent text-gray-500 hover:text-gray-300'
+                }`}
+              >
+                {s.name}
+                {progress[s.id]?.phase !== 'idle' && progress[s.id]?.phase !== undefined && (
+                  <span className="ml-1.5 w-1.5 h-1.5 bg-blue-400 rounded-full inline-block animate-pulse" />
+                )}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={runPoll}
+            disabled={running}
+            className="px-4 py-1.5 mb-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 rounded-lg text-sm font-medium transition-colors"
+          >
+            {running ? 'Running…' : 'Check Now'}
+          </button>
         </div>
 
         {last && (

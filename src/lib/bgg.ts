@@ -1,15 +1,27 @@
+import { getConfig } from './config';
+
 const BGG_API = 'https://boardgamegeek.com/xmlapi2/thing';
 const BATCH_SIZE = 20;
 const BATCH_DELAY_MS = 700;
-const HEADERS = { 'User-Agent': 'boardgamebliss-monitor/1.0' };
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
 export function parseBggId(bggUrl: string): number | null {
   const m = bggUrl.match(/\/boardgame\/(\d+)/);
   return m ? parseInt(m[1], 10) : null;
 }
 
+function buildHeaders(): Record<string, string> {
+  const { bggCookie } = getConfig();
+  const h: Record<string, string> = {
+    'User-Agent': UA,
+    'Accept': 'application/xml,text/xml,*/*',
+    'Accept-Language': 'en-CA,en;q=0.9',
+  };
+  if (bggCookie) h['Cookie'] = bggCookie;
+  return h;
+}
+
 function extractRankFromSection(section: string): number | null {
-  // Find all self-closing <rank .../> tags, pick the one with name="boardgame"
   for (const m of section.matchAll(/<rank\s[^>]+\/>/g)) {
     const tag = m[0];
     if (!tag.includes('name="boardgame"')) continue;
@@ -21,8 +33,7 @@ function extractRankFromSection(section: string): number | null {
 
 async function fetchWithRetry(url: string, retries = 2): Promise<Response> {
   for (let i = 0; i <= retries; i++) {
-    const res = await fetch(url, { headers: HEADERS });
-    // BGG returns 202 when it queued the request; retry after a pause
+    const res = await fetch(url, { headers: buildHeaders() });
     if (res.status === 202) {
       await new Promise(r => setTimeout(r, 3000));
       continue;
@@ -41,7 +52,6 @@ export async function fetchBggRanks(ids: number[]): Promise<Map<number, number |
       const res = await fetchWithRetry(url);
       if (res.ok) {
         const xml = await res.text();
-        // Split on each <item opening tag; first chunk is the XML declaration
         for (const section of xml.split('<item ').slice(1)) {
           const idMatch = section.match(/\bid="(\d+)"/);
           if (!idMatch) continue;
