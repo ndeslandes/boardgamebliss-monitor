@@ -1,32 +1,29 @@
 import { NextResponse } from 'next/server';
+import { getConfig } from '@/lib/config';
+import { getBggSessionCookie } from '@/lib/bgg-auth';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
-const BASE = { 'User-Agent': UA, 'Accept': 'application/json', 'Accept-Language': 'en-CA,en;q=0.9' };
 
-function findPaths(obj: unknown, keyword: string, path = ''): string[] {
-  const results: string[] = [];
-  if (typeof obj === 'object' && obj !== null) {
-    for (const [k, v] of Object.entries(obj)) {
-      const p = path ? `${path}.${k}` : k;
-      if (k.toLowerCase().includes(keyword)) results.push(`${p} = ${JSON.stringify(v).slice(0, 100)}`);
-      results.push(...findPaths(v, keyword, p));
-    }
-  }
-  return results;
+async function probe(url: string, cookie?: string) {
+  const headers: Record<string, string> = { 'User-Agent': UA, 'Accept': '*/*' };
+  if (cookie) headers['Cookie'] = cookie;
+  try {
+    const res = await fetch(url, { headers, redirect: 'follow' });
+    const body = await res.text();
+    return { status: res.status, hasRank: body.includes('<rank ') || body.includes('"rank"'), snippet: body.slice(0, 300) };
+  } catch (e) { return { status: 0, error: String(e) }; }
 }
 
 export async function GET() {
-  const res = await fetch(
-    'https://api.geekdo.com/api/geekitems?objecttype=thing&objectid=224517&subtype=boardgame&stats=1',
-    { headers: BASE }
-  );
-  const json = await res.json();
+  const cfg = getConfig();
+  const session = await getBggSessionCookie();
 
-  return NextResponse.json({
-    status: res.status,
-    topKeys: Object.keys(json?.item ?? {}),
-    rankPaths: findPaths(json, 'rank'),
-    statPaths: findPaths(json, 'stat'),
-    ratingPaths: findPaths(json, 'rating'),
-  });
+  const [collectionNoAuth, collectionWithSession] = await Promise.all([
+    // Public collection — historically worked without auth
+    probe(`https://boardgamegeek.com/xmlapi2/collection?username=${cfg.bggUsername}&stats=1&subtype=boardgame`),
+    // Same but with session cookie
+    probe(`https://boardgamegeek.com/xmlapi2/collection?username=${cfg.bggUsername}&stats=1&subtype=boardgame`, session ?? undefined),
+  ]);
+
+  return NextResponse.json({ collectionNoAuth, collectionWithSession, username: cfg.bggUsername });
 }
