@@ -12,24 +12,30 @@ export async function GET() {
   };
   if (bggCookie) headers['Cookie'] = bggCookie;
 
-  // Test single and batch (comma-separated objectids)
-  const [single, batch] = await Promise.all([
-    fetch('https://api.geekdo.com/api/geekitems?objecttype=thing&objectid=224517&subtype=boardgame', { headers }),
-    fetch('https://api.geekdo.com/api/geekitems?objecttype=thing&objectid=224517,174430&subtype=boardgame', { headers }),
-  ]);
+  // Probe the BGG login endpoint with bad credentials — just to see the shape of the response
+  const loginRes = await fetch('https://boardgamegeek.com/login/api/v1', {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ credentials: { username: 'test_invalid_user_xyz', password: 'bad_password' } }),
+  });
+  const loginBody = await loginRes.text();
+  const loginCookies = loginRes.headers.get('set-cookie');
 
-  const singleJson = await single.json();
-  const batchText = await batch.text();
+  // Also try geekitems with showstats
+  const statsRes = await fetch(
+    'https://api.geekdo.com/api/geekitems?objecttype=thing&objectid=224517&subtype=boardgame&showstats=1',
+    { headers }
+  );
+  const statsJson = await statsRes.json();
 
   return NextResponse.json({
-    single: {
-      status: single.status,
-      rankinfo: singleJson?.item?.rankinfo ?? singleJson?.item?.stats ?? '(not found at item.rankinfo)',
-      keys: singleJson?.item ? Object.keys(singleJson.item) : [],
-    },
-    batch: {
-      status: batch.status,
-      snippet: batchText.slice(0, 200),
+    login: { status: loginRes.status, body: loginBody.slice(0, 400), setCookie: loginCookies },
+    geekitemsWithStats: {
+      status: statsRes.status,
+      extraKeys: Object.keys(statsJson?.item ?? {}).filter((k: string) =>
+        ['rank', 'stat', 'rating', 'score', 'award'].some(w => k.toLowerCase().includes(w))
+      ),
+      links: statsJson?.item?.links ? JSON.stringify(statsJson.item.links).slice(0, 500) : '(no links)',
     },
   });
 }
